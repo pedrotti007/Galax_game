@@ -32,8 +32,12 @@ class MenuState:
             font_path = os.path.join(project_root, 'assets', 'fonts', 'sua_fonte.ttf')
             self.title_font = pygame.font.Font(font_path, 80)
             self.button_font = pygame.font.Font(font_path, 40)
-        except pygame.error as e:
-            print(f"AVISO: Fonte personalizada não encontrada em '{font_path}'. Usando fonte padrão. Erro: {e}")
+            # verifica se as fontes foram realmente criadas
+            if not hasattr(self.title_font, 'render') or not hasattr(self.button_font, 'render'):
+                raise Exception("Fonte inválida")
+        except Exception as e:
+            # Captura FileNotFoundError, pygame.error e quaisquer outros problemas
+            print(f"AVISO: Fonte personalizada não encontrada ou inválida em '{font_path}'. Usando fonte padrão. Erro: {e}")
             self.title_font = pygame.font.Font(None, 80)
             self.button_font = pygame.font.Font(None, 40)
 
@@ -99,17 +103,18 @@ class MenuState:
 
     def enter(self):
         # Atualiza o texto dos botões caso o idioma tenha mudado
-        self.buttons[0].text = TEXTS[self.game_manager.language]['start_game']
-        self.buttons[0].text_surface = self.button_font.render(self.buttons[0].text, True, (255, 255, 255))
-        self.buttons[0].text_rect = self.buttons[0].text_surface.get_rect(center=self.buttons[0].rect.center)
-
-        self.buttons[1].text = TEXTS[self.game_manager.language]['settings']
-        self.buttons[1].text_surface = self.button_font.render(self.buttons[1].text, True, (255, 255, 255))
-        self.buttons[1].text_rect = self.buttons[1].text_surface.get_rect(center=self.buttons[1].rect.center)
-
-        self.buttons[2].text = TEXTS[self.game_manager.language]['exit_game']
-        self.buttons[2].text_surface = self.button_font.render(self.buttons[2].text, True, (255, 255, 255))
-        self.buttons[2].text_rect = self.buttons[2].text_surface.get_rect(center=self.buttons[2].rect.center)
+        # Tenta renderizar com a fonte configurada; se falhar, usa SysFont como fallback.
+        for i, key in enumerate(['start_game', 'settings', 'exit_game']):
+            try:
+                self.buttons[i].text = TEXTS[self.game_manager.language][key]
+                self.buttons[i].text_surface = self.button_font.render(self.buttons[i].text, True, (255, 255, 255))
+                self.buttons[i].text_rect = self.buttons[i].text_surface.get_rect(center=self.buttons[i].rect.center)
+            except Exception:
+                # fallback seguro
+                fallback_font = pygame.font.SysFont(None, 40)
+                self.buttons[i].text = TEXTS[self.game_manager.language][key]
+                self.buttons[i].text_surface = fallback_font.render(self.buttons[i].text, True, (255, 255, 255))
+                self.buttons[i].text_rect = self.buttons[i].text_surface.get_rect(center=self.buttons[i].rect.center)
 
 
     def handle_event(self, event):
@@ -126,7 +131,11 @@ class MenuState:
             screen.fill((0, 0, 0)) # Fundo preto se a imagem não carregar
 
         # Desenha o título do jogo
-        title_text_surface = self.title_font.render(TEXTS[self.game_manager.language]['game_title'], True, (255, 255, 255)) # Cor do texto branca
+        try:
+            title_text_surface = self.title_font.render(TEXTS[self.game_manager.language]['game_title'], True, (255, 255, 255))
+        except Exception:
+            title_font_fallback = pygame.font.SysFont(None, 80)
+            title_text_surface = title_font_fallback.render(TEXTS[self.game_manager.language]['game_title'], True, (255, 255, 255))
         title_text_rect = title_text_surface.get_rect(center=(self.screen_width // 2, self.screen_height // 4))
         screen.blit(title_text_surface, title_text_rect)
 

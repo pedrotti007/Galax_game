@@ -9,12 +9,15 @@ class GameplayState:
         self.screen_height = screen_height
         self.player_pos = [screen_width // 2, screen_height // 2]
         self.player_speed = 5
-
         # --- PONTO DE MODIFICAÇÃO: INICIALIZAÇÃO DO GAMEPLAY ---
         # Carregue assets específicos do gameplay, inicialize personagens, etc.
-        # Exemplo:
-        # self.player_image = pygame.image.load('assets/images/player.png').convert_alpha()
-        self.frames.append(pygame.image.load('assets/images/player.png').convert_alpha())
+        self.player_image = None
+        try:
+            self.player_image = pygame.image.load('assets/images/player.png').convert_alpha()
+            self.player_image = pygame.transform.scale(self.player_image, (50, 50))
+        except Exception:
+            # Se não houver imagem, manter None e desenhar um retângulo como fallback
+            print("Aviso: 'assets/images/player.png' não encontrado. Usando fallback de retângulo para o jogador.")
         
     def enter(self):
         print("Entrando no estado de Gameplay!")
@@ -53,9 +56,12 @@ class GameplayState:
         screen.fill((50, 50, 150)) # Fundo azul escuro para o gameplay
 
         # Exemplo: Desenhar um quadrado representando o jogador
-        pygame.draw.rect(screen, (255, 0, 0), (self.player_pos[0], self.player_pos[1], 50, 50))
+        if self.player_image:
+            screen.blit(self.player_image, (self.player_pos[0], self.player_pos[1]))
+        else:
+            pygame.draw.rect(screen, (255, 0, 0), (self.player_pos[0], self.player_pos[1], 50, 50))
 
         # Texto de exemplo
-        font = pygame.font.SysFont('sua_fonte.ttf', 30)
+        font = pygame.font.SysFont(None, 30)
         text_surface = font.render("Gameplay! Pressione ESC para voltar ao menu.", True, (255, 255, 255))
         screen.blit(text_surface, (10, 10))
