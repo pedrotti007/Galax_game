@@ -41,25 +41,25 @@ class GameManager:
 # Dicionário de textos para localização
 TEXTS = {
     'pt': {
-        'game_title': 'MEU JOGO INCRÍVEL',
+        'game_title': 'GUERRA INTERGALAXIA',
         'start_game': 'Iniciar Jogo',
         'settings': 'Ajustes',
         'exit_game': 'Sair',
         'volume': 'Volume:',
         'language': 'Idioma:',
         'credits': 'Créditos:',
-        'credits_text': 'Desenvolvido por: Seu Nome\nArte: Artista Incrível\nMúsica: Músico Genial',
+        'credits_text': 'Desenvolvido por:Pedro Jorge, Rafael Veloso, Alef Pires e Victor Solano\nArt: Yasmin França\nMusic: Dimitri Araujo',
         'back': 'Voltar'
     },
     'en': {
-        'game_title': 'MY AWESOME GAME',
+        'game_title': 'INTERGALAXY WAR',
         'start_game': 'Start Game',
         'settings': 'Settings',
         'exit_game': 'Exit',
         'volume': 'Volume:',
         'language': 'Language:',
         'credits': 'Credits:',
-        'credits_text': 'Developed by: Your Name\nArt: Awesome Artist\nMusic: Genius Musician',
+        'credits_text': 'Developed by: Pedro Jorge, Rafael Veloso, Alef Pires and Victor Solano\nArt: Yasmin França\nMusic: Dimitri Araujo',
         'back': 'Back'
     }
 }

@@ -46,7 +46,7 @@ class MenuState:
 
     def _create_buttons(self):
         # Cores dos botões
-        button_base_color = (70, 130, 180) # Azul aço
+        button_base_color = (0,0,0)
         button_hover_color = (100, 149, 237) # Azul centáurea
 
         button_width = 300
