@@ -10,19 +10,19 @@ from game_states.gameplay_state import GameplayState
 from game_states.settings_state import SettingsState
 
 # --- CONFIGURAÇÕES DA TELA ---
-# Resolução final da janela
-SCREEN_WIDTH = 1920
-SCREEN_HEIGHT = 1080
-# Resolução lógica da gameplay para o efeito "pixel art" escalado
-GAMEPLAY_LOGICAL_WIDTH = 480
-GAMEPLAY_LOGICAL_HEIGHT = 270
 FPS = 60 # Frames por segundo
 
 def main():
     pygame.init()
     pygame.mixer.init() # Inicializa o mixer para áudio
 
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    # Obtém a resolução do monitor
+    info = pygame.display.Info()
+    SCREEN_WIDTH = info.current_w
+    SCREEN_HEIGHT = info.current_h
+
+    # Configura tela cheia
+    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.FULLSCREEN)
     pygame.display.set_caption("Guerra Intergalatica") # Título da janela do jogo
 
     game_manager = GameManager()
@@ -30,7 +30,7 @@ def main():
     # Adiciona os estados ao gerenciador
     game_manager.add_state('menu', MenuState(game_manager, SCREEN_WIDTH, SCREEN_HEIGHT))
     game_manager.add_state('cutscene', CutsceneState(game_manager, SCREEN_WIDTH, SCREEN_HEIGHT))
-    game_manager.add_state('gameplay', GameplayState(game_manager, GAMEPLAY_LOGICAL_WIDTH, GAMEPLAY_LOGICAL_HEIGHT))
+    game_manager.add_state('gameplay', GameplayState(game_manager, SCREEN_WIDTH, SCREEN_HEIGHT))
     game_manager.add_state('settings', SettingsState(game_manager, SCREEN_WIDTH, SCREEN_HEIGHT))
 
     # Define o estado inicial do jogo

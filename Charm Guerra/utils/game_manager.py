@@ -49,7 +49,7 @@ TEXTS = {
         'volume': 'Volume:',
         'language': 'Idioma:',
         'credits': 'Créditos:',
-        'credits_text': 'Desenvolvido por:Pedro Jorge, Rafael Veloso, Alef Pires e Victor Solano\nArt: Yasmin França\nMusic: Dimitri Araujo',
+        'credits_text': 'Desenvolvido por:Pedro Jorge, Rafael Fonseca, Alef Pires e Victor Solano\nArt: Yasmin França\nMusic: Dimitri Araujo',
         'back': 'Voltar'
     },
     'en': {
@@ -60,7 +60,7 @@ TEXTS = {
         'volume': 'Volume:',
         'language': 'Language:',
         'credits': 'Credits:',
-        'credits_text': 'Developed by: Pedro Jorge, Rafael Veloso, Alef Pires and Victor Solano\nArt: Yasmin França\nMusic: Dimitri Araujo',
+        'credits_text': 'Developed by: Pedro Jorge, Rafael Fonseca, Alef Pires and Victor Solano\nArt: Yasmin França\nMusic: Dimitri Araujo',
         'back': 'Back'
     }
 }

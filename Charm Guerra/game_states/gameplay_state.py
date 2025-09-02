@@ -1,5 +1,6 @@
 # game_states/gameplay_state.py
 
+import os
 import pygame
 from .map_manager import MapManager
 
@@ -9,18 +10,57 @@ class GameplayState:
         self.screen_width = screen_width
         self.screen_height = screen_height
 
-        # --- NOVO: Superfície de gameplay para a escala ---
-        self.gameplay_surface = pygame.Surface((self.screen_width, self.screen_height))
-        
         # Configurações do jogador
-        self.player_rect_size = (50, 80) # Tamanho LÓGICO do jogador
-        self.player_pos = [100, screen_height - 100]  # Posição inicial mais adequada para side-scrolling
-        self.player_speed = 5
-        self.player_velocity_y = 0
+        self.player_rect_size = (250, 400)  # Hitbox do jogador aumentada 5x
+        self.player_visual_size = (375, 400)  # Tamanho visual do sprite aumentado 5x (mantendo proporção mais larga)
+        self.player_speed = 8  # Aumentado para compensar o tamanho maior
         self.gravity = 0.8
         self.jump_force = -15
-        self.is_jumping = False
-        self.facing_right = True
+        self.is_game_over = False
+        
+        # Sistema de mapa
+        self.map_manager = MapManager(screen_width, screen_height)
+        self.map_manager.load_map(1)  # Carrega o mapa de teste
+        
+        # Camera/Scrolling
+        self.camera_x = 0
+        self.camera_y = 0
+        
+        # Estado inicial do jogador
+        self.reset_player()
+        
+        # Carregando texturas
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir)
+        
+        # Carrega a textura do fundo
+        try:
+            self.background_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'ground.png')).convert()
+            
+            # Ajusta a altura para ser exatamente a altura da tela
+            original_aspect = self.background_image.get_width() / self.background_image.get_height()
+            new_height = screen_height
+            new_width = int(new_height * original_aspect)  # Mantém a proporção original
+            
+            self.background_image = pygame.transform.scale(self.background_image, (new_width, new_height))
+            
+            # Guarda as dimensões do background para uso no scrolling
+            self.background_width = new_width
+            self.background_height = new_height
+        except Exception as e:
+            print(f"Erro ao carregar ground.png: {e}")
+            self.background_image = pygame.Surface((screen_width, screen_height))
+            self.background_image.fill((135, 206, 235))  # Fallback para azul céu
+            self.background_width = screen_width
+            self.background_height = screen_height
+            
+        # Carrega a textura do player
+        try:
+            self.player_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'player.png')).convert_alpha()
+            self.player_image = pygame.transform.scale(self.player_image, self.player_visual_size)
+        except Exception as e:
+            print(f"Erro ao carregar player.png: {e}")
+            self.player_image = None
         
         # Sistema de tiro
         self.bullets = []
@@ -41,39 +81,55 @@ class GameplayState:
             print("Usando visual padrão para os projéteis")
         self.aim_direction = [1, 0]  # [x, y] direção padrão (para frente)
         
-        # Sistema de mapa
-        self.map_manager = MapManager(screen_width, screen_height)
-        self.map_manager.load_map(1)  # Carrega o mapa de teste
+        # Inicialização do estado atual do jogador
+        self.player_pos = [100, screen_height - 100]  # Posição inicial temporária
+        self.player_velocity_y = 0
+        self.is_jumping = False
+        self.facing_right = True
         
-        # Camera/Scrolling
-        self.camera_x = 0
+
         
-        # Ajustar posição inicial do jogador para o ponto de spawn
+    def reset_player(self):
+        """Reinicia a posição e estado do jogador"""
         self.player_pos = list(self.map_manager.get_spawn_point())
+        self.player_velocity_y = 0
+        self.is_jumping = False
+        self.facing_right = True
+        self.is_game_over = False
+        self.camera_x = 0
+        self.camera_y = 0
         
-        # Carregamento de assets
-        self.player_image_original = None # Imagem base em alta resolução
-        self.player_image_hires = None # Versão reescalada para a tela final
-        try:
-            self.player_image_original = pygame.image.load('assets/images/player.png').convert_alpha()
-        except Exception:
-            print("Aviso: 'assets/images/player.png' não encontrado. Usando fallback de retângulo para o jogador.")
+    def game_over(self):
+        """Ativa o estado de game over"""
+        self.is_game_over = True
         
     def enter(self):
+        """Chamado quando o estado é ativado"""
         print("Entrando no estado de Gameplay!")
-        # Inicie a música do jogo aqui, se houver
-        # pygame.mixer.music.load('assets/audio/game_music.mp3')
-        # pygame.mixer.music.play(-1) # -1 para loop infinito
+        self.reset_player()
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
+                self.reset_player()  # Reseta o player antes de voltar ao menu
                 self.game_manager.set_state('menu')
-            elif (event.key == pygame.K_SPACE or event.key == pygame.K_w or event.key == pygame.K_UP) and not self.is_jumping:
+            elif event.key == pygame.K_r and self.is_game_over:
+                self.reset_player()  # Reinicia o jogo quando R é pressionado no game over
+            elif (event.key == pygame.K_SPACE or event.key == pygame.K_w or event.key == pygame.K_UP) and not self.is_jumping and not self.is_game_over:
                 self.player_velocity_y = self.jump_force
                 self.is_jumping = True
+            elif event.key == pygame.K_F11:
+                # Alternar entre fullscreen e windowed
+                if pygame.display.get_surface().get_flags() & pygame.FULLSCREEN:
+                    pygame.display.set_mode((1280, 720))
+                else:
+                    info = pygame.display.Info()
+                    pygame.display.set_mode((info.current_w, info.current_h), pygame.FULLSCREEN)
 
     def update(self):
+        if self.is_game_over:
+            return  # Não atualiza a gameplay se estiver em game over
+            
         keys = pygame.key.get_pressed()
         
         # Movimento horizontal com WASD e setas
@@ -154,82 +210,117 @@ class GameplayState:
                 bullet['pos'][1] < 0 or bullet['pos'][1] > self.screen_height):
                 self.bullets.remove(bullet)
         
-        # Atualizar câmera (scrolling simples)
-        target_x = self.player_pos[0] - self.screen_width // 3
-        self.camera_x += (target_x - self.camera_x) * 0.1
+        # Atualizar câmera (apenas scrolling horizontal)
+        target_x = self.player_pos[0] - self.screen_width // 3  # 1/3 da tela para melhor visibilidade à frente
         
-        # Limitar o jogador à tela
-        self.player_pos[0] = max(0, min(self.screen_width - self.player_rect_size[0], self.player_pos[0]))
+        # Suavização da câmera apenas no eixo X
+        camera_smoothness_x = 0.12 if abs(target_x - self.camera_x) > 100 else 0.08  # Mais suave para movimentos pequenos
+        
+        # Adicionar pequeno offset baseado na direção do movimento
+        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+            target_x += 100  # Offset para ver mais à frente quando movendo para direita
+        elif keys[pygame.K_LEFT] or keys[pygame.K_a]:
+            target_x -= 100  # Offset para ver mais à frente quando movendo para esquerda
+        
+        # Aplicar suavização apenas na câmera horizontal
+        self.camera_x += (target_x - self.camera_x) * camera_smoothness_x
+        self.camera_y = 0  # Mantém a câmera fixa verticalmente
+        
+        # Verificar game over (caiu do mapa)
+        if self.player_pos[1] > self.screen_height * 1.5:  # Margem para queda
+            self.game_over()
 
 
     def draw(self, screen):
-        # --- LÓGICA DE DESENHO ESCALADO ---
-        # 1. Desenha todos os elementos do jogo na superfície pequena (gameplay_surface)
+        # Limpar a tela para evitar rastros
+        screen.fill((0, 0, 0))
         
-        # Fundo da gameplay
-        self.gameplay_surface.fill((135, 206, 235))  # Céu azul claro
+        # Calcular os offsets da câmera
+        camera_offset_x = int(-self.camera_x)
+        camera_offset_y = int(-self.camera_y)
         
-        # Aplicar offset da câmera em todos os elementos
-        camera_offset = int(-self.camera_x)
+        # Desenhar o fundo com parallax suave
+        bg_offset_x = camera_offset_x // 2  # Movimento mais lento que a câmera (parallax)
+        
+        # Calcular a posição x do background considerando o tamanho total da imagem
+        bg_x = bg_offset_x % self.background_width
+        
+        # Desenhar o background principal
+        screen.blit(self.background_image, (bg_x, 0))
+        
+        # Se necessário, desenhar uma segunda cópia para preencher a lacuna
+        if bg_x < 0:
+            screen.blit(self.background_image, (bg_x + self.background_width, 0))
+        elif bg_x > self.background_width - self.screen_width:
+            screen.blit(self.background_image, (bg_x - self.background_width, 0))
         
         # Desenhar o mapa
-        self.map_manager.draw(self.gameplay_surface, camera_offset=camera_offset)
+        self.map_manager.draw(screen, camera_offset_x=camera_offset_x, camera_offset_y=camera_offset_y)
         
-        # Desenhar projéteis com efeitos
+        # Desenhar projéteis
         for bullet in self.bullets:
-            # Posição atual do projétil
-            current_x = int(bullet['pos'][0] + camera_offset) # A posição já é relativa à câmera
-            current_y = int(bullet['pos'][1])
+            current_x = int(bullet['pos'][0] + camera_offset_x)
+            current_y = int(bullet['pos'][1] + camera_offset_y)
             
             # Desenhar trilha do projétil
             for i in range(self.bullet_trail_length):
-                trail_x = int(current_x - (bullet['direction_x'] * (i * 4))) # O offset da câmera já está em current_x
-                trail_y = int(current_y - (bullet['direction_y'] * (i * 4))) # O eixo Y não tem câmera
+                trail_x = int(current_x - (bullet['direction_x'] * (i * 4)))
+                trail_y = int(current_y - (bullet['direction_y'] * (i * 4)))
                 trail_size = self.bullet_size - (i * 2)
                 if trail_size > 0:
-                    # Cor da trilha (amarelo para laranja)
                     trail_color = (255, 255 - (i * 60), 0)
-                    pygame.draw.circle(self.gameplay_surface, trail_color, (trail_x, trail_y), trail_size)
+                    pygame.draw.circle(screen, trail_color, (trail_x, trail_y), trail_size)
             
             # Desenhar o projétil principal
             if self.bullet_image:
-                # Quando tivermos uma imagem para o projétil
-                self.gameplay_surface.blit(self.bullet_image, (current_x - 8, current_y - 8))
+                screen.blit(self.bullet_image, (current_x - 8, current_y - 8))
             else:
-                # Efeito de brilho (círculos sobrepostos)
-                pygame.draw.circle(self.gameplay_surface, (255, 255, 200), (current_x, current_y), self.bullet_size + 2)  # Brilho externo
-                pygame.draw.circle(self.gameplay_surface, (255, 255, 0), (current_x, current_y), self.bullet_size)  # Projétil principal
+                pygame.draw.circle(screen, (255, 255, 200), (current_x, current_y), self.bullet_size + 2)
+                pygame.draw.circle(screen, (255, 255, 0), (current_x, current_y), self.bullet_size)
         
-        # 2. Escala a superfície pequena para a tela final. `transform.scale` cria o efeito pixelado.
-        final_screen_size = screen.get_size()
-        scaled_surface = pygame.transform.scale(self.gameplay_surface, final_screen_size)
-        screen.blit(scaled_surface, (0, 0))
-
-        # 3. DESENHA O JOGADOR EM ALTA RESOLUÇÃO (por cima da tela escalada)
-        # Calcula os fatores de escala
-        scale_x = final_screen_size[0] / self.screen_width
-        scale_y = final_screen_size[1] / self.screen_height
-
-        # Prepara a imagem de alta resolução do jogador na primeira vez
-        if self.player_image_original and self.player_image_hires is None:
-            hires_size = (int(self.player_rect_size[0] * scale_x), int(self.player_rect_size[1] * scale_y))
-            self.player_image_hires = pygame.transform.scale(self.player_image_original, hires_size)
-
-        # Calcula a posição final do jogador na tela
-        player_screen_x_float = (self.player_pos[0] + camera_offset) * scale_x
-        player_screen_y_float = self.player_pos[1] * scale_y
-
-        if self.player_image_hires:
-            image_to_draw = pygame.transform.flip(self.player_image_hires, not self.facing_right, False)
-            # Arredonda a posição final para o pixel mais próximo para evitar o tremor
-            screen.blit(image_to_draw, (round(player_screen_x_float), round(player_screen_y_float)))
+        # Desenhar o player
+        player_screen_x = int(self.player_pos[0] + camera_offset_x)
+        player_screen_y = int(self.player_pos[1] + camera_offset_y)
+        
+        if self.player_image:
+            # Virar a imagem horizontalmente se necessário
+            image_to_draw = pygame.transform.flip(self.player_image, not self.facing_right, False)
+            # Centralizar a textura mais larga em relação à hitbox
+            visual_offset_x = (self.player_visual_size[0] - self.player_rect_size[0]) // 2
+            screen.blit(image_to_draw, (player_screen_x - visual_offset_x, player_screen_y))
+            
+            # Desenhar hitbox para debug (comentar em produção)
+            # pygame.draw.rect(screen, (255, 0, 0), pygame.Rect(
+            #     player_screen_x,
+            #     player_screen_y,
+            #     self.player_rect_size[0],
+            #     self.player_rect_size[1]
+            # ), 1)
         else:
-            # Fallback: desenha um retângulo em alta resolução
-            player_screen_rect = pygame.Rect(round(player_screen_x_float), round(player_screen_y_float), self.player_rect_size[0] * scale_x, self.player_rect_size[1] * scale_y)
-            pygame.draw.rect(screen, (255, 0, 0), player_screen_rect)
+            # Fallback: desenha um retângulo vermelho
+            player_rect = pygame.Rect(
+                player_screen_x,
+                player_screen_y,
+                self.player_rect_size[0],
+                self.player_rect_size[1]
+            )
+            pygame.draw.rect(screen, (255, 0, 0), player_rect)
 
-
-        # 4. Desenha o HUD diretamente na tela final para que o texto fique nítido.
+        # Desenhar HUD
         font = pygame.font.SysFont(None, 30)
-        text_surface = font.render("ESPAÇO para pular, X para atirar, ESC para menu", True, (255, 255, 255))
-        screen.blit(text_surface, (10, 10))
+        if self.is_game_over:
+            # Texto de Game Over
+            game_over_font = pygame.font.SysFont(None, 72)
+            text_game_over = game_over_font.render("GAME OVER", True, (255, 0, 0))
+            text_restart = font.render("Pressione R para reiniciar", True, (255, 255, 255))
+            
+            # Centralizar textos
+            text_game_over_rect = text_game_over.get_rect(center=(self.screen_width//2, self.screen_height//2 - 40))
+            text_restart_rect = text_restart.get_rect(center=(self.screen_width//2, self.screen_height//2 + 20))
+            
+            screen.blit(text_game_over, text_game_over_rect)
+            screen.blit(text_restart, text_restart_rect)
+        else:
+            # HUD normal
+            text_surface = font.render("ESPAÇO para pular, X para atirar, ESC para menu", True, (255, 255, 255))
+            screen.blit(text_surface, (10, 10))

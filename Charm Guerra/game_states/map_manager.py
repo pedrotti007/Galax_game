@@ -18,17 +18,16 @@ class MapManager:
             self._create_platform_test()
             
     def _create_test_map(self):
-        """Mapa básico de teste com algumas plataformas"""
-        # Chão
-        self.add_platform(0, self.screen_height - 40, self.screen_width, 40)
+        """Mapa básico de teste para side-scroller"""
+        # Chão - alinhado exatamente com a parte inferior da tela
+        ground_height = 200  # Chão mais alto para combinar com o personagem maior
+        self.add_platform(0, self.screen_height - ground_height, self.screen_width * 10, ground_height)  # Chão bem mais largo
         
-        # Plataformas (altura reduzida entre elas)
-        self.add_platform(300, self.screen_height - 160, 200, 20)  # Reduzido de 200 para 160
-        self.add_platform(600, self.screen_height - 240, 200, 20)  # Reduzido de 300 para 240
-        self.add_platform(100, self.screen_height - 320, 200, 20)  # Reduzido de 400 para 320
+        # Remove todas as plataformas flutuantes já que é um side-scroller
         
-        # Ponto de spawn do jogador
-        self.spawn_points = [(100, self.screen_height - 100)]
+        # Ponto de spawn do jogador - logo acima do chão
+        spawn_height = 20  # Bem próximo ao chão
+        self.spawn_points = [(400, self.screen_height - (ground_height + spawn_height))]  # Spawn mais afastado da borda
         
     def _create_platform_test(self):
         """Mapa para testar diferentes tipos de plataformas"""
@@ -54,11 +53,19 @@ class MapManager:
         """Retorna o ponto de spawn inicial"""
         return self.spawn_points[0] if self.spawn_points else (100, self.screen_height - 100)
         
-    def draw(self, screen, camera_offset=0):
-        """Desenha todos os elementos do mapa"""
+    def draw(self, screen, camera_offset_x=0, camera_offset_y=0):
+        """Desenha todos os elementos do mapa que estão visíveis na tela"""
+        screen_rect = screen.get_rect()
+        
         for platform in self.platforms:
-            pygame.draw.rect(screen, platform['color'],
-                           pygame.Rect(platform['rect'].x + camera_offset,
-                                     platform['rect'].y,
-                                     platform['rect'].width,
-                                     platform['rect'].height))
+            # Cria um retângulo para a plataforma com o offset da câmera
+            platform_rect = pygame.Rect(
+                platform['rect'].x + camera_offset_x,
+                platform['rect'].y + camera_offset_y,
+                platform['rect'].width,
+                platform['rect'].height
+            )
+            
+            # Só desenha a plataforma se ela estiver visível na tela
+            if platform_rect.colliderect(screen_rect):
+                pygame.draw.rect(screen, platform['color'], platform_rect)
