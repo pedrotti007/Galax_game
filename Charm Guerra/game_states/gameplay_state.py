@@ -11,11 +11,11 @@ class GameplayState:
         self.screen_height = screen_height
 
         # Configurações do jogador
-        self.player_rect_size = (250, 400)  # Hitbox do jogador aumentada 5x
-        self.player_visual_size = (375, 400)  # Tamanho visual do sprite aumentado 5x (mantendo proporção mais larga)
+        self.player_rect_size = (150, 228)  # Hitbox do jogador (ex: 3x o tamanho original)
+        self.player_visual_size = (225, 240)  # Tamanho visual do sprite (ex: 3x o tamanho original)
         self.player_speed = 8  # Aumentado para compensar o tamanho maior
         self.gravity = 0.8
-        self.jump_force = -15
+        self.jump_force = -20
         self.is_game_over = False
         
         # Sistema de mapa
@@ -35,7 +35,7 @@ class GameplayState:
         
         # Carrega a textura do fundo
         try:
-            self.background_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'ground.png')).convert()
+            self.background_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'game_background.png')).convert()
             
             # Ajusta a altura para ser exatamente a altura da tela
             original_aspect = self.background_image.get_width() / self.background_image.get_height()
@@ -48,7 +48,7 @@ class GameplayState:
             self.background_width = new_width
             self.background_height = new_height
         except Exception as e:
-            print(f"Erro ao carregar ground.png: {e}")
+            print(f"Erro ao carregar game_background.png: {e}")
             self.background_image = pygame.Surface((screen_width, screen_height))
             self.background_image.fill((135, 206, 235))  # Fallback para azul céu
             self.background_width = screen_width
@@ -68,8 +68,14 @@ class GameplayState:
         self.last_shot_time = 0
         self.shot_cooldown = 80  # Tempo entre tiros ainda menor
         
+        # --- PONTO DE MODIFICAÇÃO: Posição da ponta da arma ---
+        # Ajuste estes valores para alinhar o tiro perfeitamente com a sua arma.
+        # As coordenadas (x, y) são relativas ao canto superior esquerdo do JOGADOR (player_pos).
+        self.gun_barrel_offset_right = (150,128) # (x, y) quando virado para a direita
+        self.gun_barrel_offset_left = (-10,128)  # (x, y) quando virado para a esquerda
+        
         # Configurações visuais dos projéteis
-        self.bullet_size = 8  # Tamanho base do projétil
+        self.bullet_size = 6  # Tamanho base do projétil
         self.bullet_trail_length = 3  # Quantidade de partículas de trail
         self.bullet_image = None
         try:
@@ -161,8 +167,14 @@ class GameplayState:
             current_time = pygame.time.get_ticks()
             if current_time - self.last_shot_time > self.shot_cooldown:
                 # Criar novo projétil
-                bullet_x = self.player_pos[0] + (self.player_rect_size[0] if self.facing_right else 0)
-                bullet_y = self.player_pos[1] + (self.player_rect_size[1] / 2)
+                # --- CORREÇÃO: Posição da bala alinhada com a arma ---
+                if self.facing_right:
+                    offset_x, offset_y = self.gun_barrel_offset_right
+                else:
+                    offset_x, offset_y = self.gun_barrel_offset_left
+                
+                bullet_x = self.player_pos[0] + offset_x
+                bullet_y = self.player_pos[1] + offset_y
                 
                 # Normalizar a direção do tiro
                 magnitude = (self.aim_direction[0]**2 + self.aim_direction[1]**2)**0.5
@@ -205,24 +217,28 @@ class GameplayState:
         for bullet in self.bullets[:]:
             bullet['pos'][0] += self.bullet_speed * bullet['direction_x']
             bullet['pos'][1] += self.bullet_speed * bullet['direction_y']
-            # Remover projéteis que saíram da tela
-            if (bullet['pos'][0] < 0 or bullet['pos'][0] > self.screen_width or
-                bullet['pos'][1] < 0 or bullet['pos'][1] > self.screen_height):
+
+            # --- CORREÇÃO: Remover projéteis que saíram da VISTA DA CÂMERA ---
+            # A posição do projétil está em coordenadas do mundo. O código antigo comparava
+            # com o tamanho da tela (ex: 1920), fazendo com que os tiros desaparecessem
+            # assim que o jogador passasse dessa coordenada no mapa.
+            # A forma correta é comparar com os limites da câmera no mundo do jogo.
+            margin = 200 # Margem para garantir que o projétil suma bem fora da tela
+            camera_view_left = self.camera_x - margin
+            camera_view_right = self.camera_x + self.screen_width + margin
+
+            if not (camera_view_left < bullet['pos'][0] < camera_view_right):
                 self.bullets.remove(bullet)
-        
-        # Atualizar câmera (apenas scrolling horizontal)
-        target_x = self.player_pos[0] - self.screen_width // 3  # 1/3 da tela para melhor visibilidade à frente
-        
-        # Suavização da câmera apenas no eixo X
-        camera_smoothness_x = 0.12 if abs(target_x - self.camera_x) > 100 else 0.08  # Mais suave para movimentos pequenos
-        
-        # Adicionar pequeno offset baseado na direção do movimento
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            target_x += 100  # Offset para ver mais à frente quando movendo para direita
-        elif keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            target_x -= 100  # Offset para ver mais à frente quando movendo para esquerda
-        
-        # Aplicar suavização apenas na câmera horizontal
+            elif bullet['pos'][1] < -margin or bullet['pos'][1] > self.screen_height + margin:
+                self.bullets.remove(bullet)
+
+        # --- LÓGICA DA CÂMERA ATUALIZADA ---
+        # O alvo da câmera é calculado para que o centro do jogador fique no centro da tela.
+        player_center_x = self.player_pos[0] + self.player_rect_size[0] / 2
+        target_x = player_center_x - self.screen_width / 2
+
+        # A suavização da câmera torna o movimento mais fluido.
+        camera_smoothness_x = 0.1
         self.camera_x += (target_x - self.camera_x) * camera_smoothness_x
         self.camera_y = 0  # Mantém a câmera fixa verticalmente
         
