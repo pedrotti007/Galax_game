@@ -2,6 +2,7 @@
 
 import os
 import pygame
+import random
 from .map_manager import MapManager
 
 class GameplayState:
@@ -11,16 +12,28 @@ class GameplayState:
         self.screen_height = screen_height
 
         # Configurações do jogador
-        self.player_rect_size = (150, 228)  # Hitbox do jogador (ex: 3x o tamanho original)
+        self.player_rect_size = (120, 220)  # Hitbox do jogador, um pouco menor para colisões mais permissivas
         self.player_visual_size = (225, 240)  # Tamanho visual do sprite (ex: 3x o tamanho original)
         self.player_speed = 8  # Aumentado para compensar o tamanho maior
         self.gravity = 0.8
-        self.jump_force = -20
+        self.jump_force = -23
         self.is_game_over = False
         
-        # Sistema de mapa
-        self.map_manager = MapManager(screen_width, screen_height)
-        self.map_manager.load_map(1)  # Carrega o mapa de teste
+        # --- Sistema de Geração de Plataformas Flutuantes ---
+        self.platforms = []
+        # Parâmetros de geração (ajuste para mudar a dificuldade)
+        self.min_platform_width = 190
+        self.max_platform_width = 450
+        self.min_gap_x = 1000 # Aumentado AINDA MAIS para gerar MENOS plataformas
+        self.max_gap_x = 1300  # Aumentado AINDA MAIS para gerar MENOS plataformas
+        self.min_gap_y = -100 # Aumentado para posições verticais MAIS aleatórias
+        self.max_gap_y = 250  # Aumentado para posições verticais MAIS aleatórias
+        self.last_platform_end_x = 0
+        
+        # --- NOVO: Chão Fixo ---
+        self.ground_y = self.screen_height - 60
+        self.ground_color = (139, 69, 19) # Cor de terra
+        self.last_floating_platform_y = self.ground_y - 150 # Altura inicial para a primeira plataforma flutuante
         
         # Camera/Scrolling
         self.camera_x = 0
@@ -75,7 +88,7 @@ class GameplayState:
         self.gun_barrel_offset_left = (-10,128)  # (x, y) quando virado para a esquerda
         
         # Configurações visuais dos projéteis
-        self.bullet_size = 6  # Tamanho base do projétil
+        self.bullet_size = 4  # Tamanho base do projétil
         self.bullet_trail_length = 3  # Quantidade de partículas de trail
         self.bullet_image = None
         try:
@@ -96,14 +109,65 @@ class GameplayState:
 
         
     def reset_player(self):
-        """Reinicia a posição e estado do jogador"""
-        self.player_pos = list(self.map_manager.get_spawn_point())
+        """Reinicia a posição e estado do jogador e gera o mapa inicial."""
+        self.platforms.clear()
+        self._generate_initial_platforms()
+        
+        # Posiciona o jogador no chão inicial
+        self.player_pos = [200, self.ground_y - self.player_rect_size[1]]
+        
         self.player_velocity_y = 0
         self.is_jumping = False
         self.facing_right = True
         self.is_game_over = False
         self.camera_x = 0
         self.camera_y = 0
+
+    def _generate_initial_platforms(self):
+        """Cria as plataformas flutuantes iniciais."""
+        # Começa a gerar plataformas um pouco à frente do jogador
+        self.last_platform_end_x = 400
+        self.last_floating_platform_y = self.ground_y - 150
+
+        # Gera algumas plataformas iniciais para preencher a tela
+        while self.last_platform_end_x < self.screen_width * 2:
+            self._generate_next_platform()
+
+    def _generate_next_platform(self):
+        """Gera uma única plataforma nova à frente da última."""
+        gap_x = random.randint(self.min_gap_x, self.max_gap_x)
+        gap_y = random.randint(self.min_gap_y, self.max_gap_y)
+        width = random.randint(self.min_platform_width, self.max_platform_width)
+        
+        new_x = self.last_platform_end_x + gap_x
+        new_y = self.last_floating_platform_y + gap_y
+        
+        # Limita a altura das plataformas para não saírem muito da tela e ficarem acima do chão
+        # --- CORREÇÃO: Força as plataformas a aparecerem mais para cima ---
+        top_limit = self.screen_height * 0.1 # 30% do topo da tela
+        bottom_limit = self.screen_height * 0.6 # Limite inferior para não ficarem muito baixas
+        new_y = max(top_limit, min(new_y, bottom_limit))
+        
+        self.add_platform(new_x, new_y, width)
+        self.last_platform_end_x = new_x + width
+        self.last_floating_platform_y = new_y
+
+    def add_platform(self, x, y, width):
+        """Adiciona uma nova plataforma à lista."""
+        platform = {
+            'rect': pygame.Rect(x, y, width, 40), # Altura fixa de 40
+            'color': (0,0,0) # Cor Preta
+        }
+        self.platforms.append(platform)
+
+    def _manage_platforms(self):
+        """Verifica se precisa gerar novas plataformas e remove as antigas."""
+        # Gera novas plataformas se a última estiver entrando na tela
+        if self.last_platform_end_x < self.camera_x + self.screen_width * 1.5:
+            self._generate_next_platform()
+            
+        # Remove plataformas antigas que já saíram completamente da tela
+        self.platforms = [p for p in self.platforms if p['rect'].right > self.camera_x - 200]
         
     def game_over(self):
         """Ativa o estado de game over"""
@@ -197,21 +261,32 @@ class GameplayState:
         self.player_velocity_y += self.gravity
         self.player_pos[1] += self.player_velocity_y
         
-        # Verificar colisão com plataformas
+        # --- CORREÇÃO: Lógica de colisão separada para chão infinito e plataformas ---
         player_rect = pygame.Rect(self.player_pos[0], self.player_pos[1], self.player_rect_size[0], self.player_rect_size[1])
-        for platform in self.map_manager.platforms:
-            if player_rect.colliderect(platform['rect']):
-                # Colisão por cima da plataforma
-                if self.player_velocity_y > 0:
-                    player_rect.bottom = platform['rect'].top
+        
+        # 1. Verificar colisão com as plataformas flutuantes
+        for platform in self.platforms:
+            collidable_rect = platform['rect']
+            if player_rect.colliderect(collidable_rect):
+                # Colisão por cima (pousando)
+                if self.player_velocity_y > 0 and player_rect.bottom > collidable_rect.top:
+                    player_rect.bottom = collidable_rect.top
                     self.player_pos[1] = player_rect.y
                     self.player_velocity_y = 0
                     self.is_jumping = False
-                # Colisão por baixo da plataforma
-                elif self.player_velocity_y < 0:
-                    player_rect.top = platform['rect'].bottom
+                # Colisão por baixo (batendo a cabeça)
+                elif self.player_velocity_y < 0 and player_rect.top < collidable_rect.bottom:
+                    player_rect.top = collidable_rect.bottom
                     self.player_pos[1] = player_rect.y
                     self.player_velocity_y = 0
+        
+        # 2. Verificar colisão com o chão (que agora é infinito)
+        # A condição `self.player_velocity_y >= 0` previne que o jogador seja "puxado" para o chão se ele pulou de uma plataforma baixa.
+        if player_rect.bottom >= self.ground_y and self.player_velocity_y >= 0:
+            player_rect.bottom = self.ground_y
+            self.player_pos[1] = player_rect.y
+            self.player_velocity_y = 0
+            self.is_jumping = False
         
         # Atualizar projéteis
         for bullet in self.bullets[:]:
@@ -242,6 +317,9 @@ class GameplayState:
         self.camera_x += (target_x - self.camera_x) * camera_smoothness_x
         self.camera_y = 0  # Mantém a câmera fixa verticalmente
         
+        # --- NOVO: Gerenciamento de plataformas ---
+        self._manage_platforms()
+        
         # Verificar game over (caiu do mapa)
         if self.player_pos[1] > self.screen_height * 1.5:  # Margem para queda
             self.game_over()
@@ -270,8 +348,18 @@ class GameplayState:
         elif bg_x > self.background_width - self.screen_width:
             screen.blit(self.background_image, (bg_x - self.background_width, 0))
         
-        # Desenhar o mapa
-        self.map_manager.draw(screen, camera_offset_x=camera_offset_x, camera_offset_y=camera_offset_y)
+        # --- NOVO: Desenhar o chão fixo ---
+        # Desenha um retângulo para o chão que cobre toda a largura da tela.
+        # Como a câmera não se move verticalmente, a posição Y é fixa em relação à tela.
+        ground_draw_y = self.ground_y + camera_offset_y
+        pygame.draw.rect(screen, self.ground_color, (0, ground_draw_y, screen.get_width(), screen.get_height() - ground_draw_y))
+        
+        # --- Desenhar plataformas flutuantes ---
+        screen_rect = screen.get_rect()
+        for platform in self.platforms:
+            platform_rect_on_screen = platform['rect'].move(camera_offset_x, camera_offset_y)
+            if platform_rect_on_screen.colliderect(screen_rect): # Otimização para desenhar só o visível
+                pygame.draw.rect(screen, platform['color'], platform_rect_on_screen)
         
         # Desenhar projéteis
         for bullet in self.bullets:
@@ -301,9 +389,13 @@ class GameplayState:
         if self.player_image:
             # Virar a imagem horizontalmente se necessário
             image_to_draw = pygame.transform.flip(self.player_image, not self.facing_right, False)
-            # Centralizar a textura mais larga em relação à hitbox
+            
+            # --- CORREÇÃO: Centraliza a textura visual em relação à hitbox ---
+            # O offset X centraliza a imagem horizontalmente.
             visual_offset_x = (self.player_visual_size[0] - self.player_rect_size[0]) // 2
-            screen.blit(image_to_draw, (player_screen_x - visual_offset_x, player_screen_y))
+            # O offset Y alinha a parte de baixo da imagem com a parte de baixo da hitbox, evitando que o personagem "afunde" no chão.
+            visual_offset_y = self.player_visual_size[1] - self.player_rect_size[1]
+            screen.blit(image_to_draw, (player_screen_x - visual_offset_x, player_screen_y - visual_offset_y))
             
             # Desenhar hitbox para debug (comentar em produção)
             # pygame.draw.rect(screen, (255, 0, 0), pygame.Rect(
