@@ -1,9 +1,10 @@
-# game_states/gameplay_state.py
-
 import os
 import pygame
 import random
+import math
 from .map_manager import MapManager
+from .enemy import Enemy
+from .collectible import Collectible
 
 class GameplayState:
     def __init__(self, game_manager, screen_width, screen_height):
@@ -14,20 +15,26 @@ class GameplayState:
         # Configurações do jogador
         self.player_rect_size = (120, 220)  # Hitbox do jogador, um pouco menor para colisões mais permissivas
         self.player_visual_size = (225, 240)  # Tamanho visual do sprite (ex: 3x o tamanho original)
-        self.player_speed = 8  # Aumentado para compensar o tamanho maior
-        self.gravity = 0.8
-        self.jump_force = -23
+        self.player_speed = 0.8  # Aceleração do movimento
+        self.max_speed = 12  # Velocidade máxima horizontal
+        self.friction = 0.85  # Atrito para desaceleração suave
+        self.gravity = 0.6  # Gravidade mais suave
+        self.jump_force = -18  # Força de pulo mais suave
+        self.wall_slide_speed = 2  # Velocidade de deslizamento na parede
         self.is_game_over = False
+        self.player_velocity_x = 0  # Velocidade horizontal do jogador
+        self.is_wall_sliding = False  # Estado de deslizamento na parede
         
         # --- Sistema de Geração de Plataformas Flutuantes ---
         self.platforms = []
         # Parâmetros de geração (ajuste para mudar a dificuldade)
-        self.min_platform_width = 190
-        self.max_platform_width = 450
-        self.min_gap_x = 1000 # Aumentado AINDA MAIS para gerar MENOS plataformas
-        self.max_gap_x = 1300  # Aumentado AINDA MAIS para gerar MENOS plataformas
-        self.min_gap_y = -100 # Aumentado para posições verticais MAIS aleatórias
-        self.max_gap_y = 250  # Aumentado para posições verticais MAIS aleatórias
+        self.min_platform_width = 150
+        self.max_platform_width = 300
+        self.min_gap_x = 300  # Gaps menores para facilitar o pulo
+        self.max_gap_x = 500  # Gaps menores para facilitar o pulo
+        self.min_gap_y = -80  # Menor variação vertical
+        self.max_gap_y = 80   # Menor variação vertical
+        self.platform_height = 20  # Altura reduzida das plataformas
         self.last_platform_end_x = 0
         
         # --- NOVO: Chão Fixo ---
@@ -39,12 +46,51 @@ class GameplayState:
         self.camera_x = 0
         self.camera_y = 0
         
-        # Estado inicial do jogador
-        self.reset_player()
+        # Sistema de vida e munição
+        self.max_health = 5  # Número máximo de corações
+        self.hits_per_heart = 15
+        self.player_hit_points = self.max_health * self.hits_per_heart
+        self.current_health = self.max_health
+        self.max_ammo = 60 # Munição máxima
+        self.current_ammo = 60  # Munição inicial
+        self.shot_cooldown = 300  # Aumentado para 300ms (era 80ms)
+        self.collectibles = []  # Lista de coletáveis
+
+        # Sistema de inimigos e trincheiras
+        self.enemies = []
+        self.enemy_hp = {}
+        self.trenches = []  # Lista de trincheiras (cada uma é um grupo de inimigos)
+        self.trench_positions = [] # Posições X das trincheiras
+        self.enemy_bullets = []  # Lista de tiros dos inimigos
+        self.num_trenches = 3  # Número de trincheiras antes do boss
+        self.trench_width = 400  # Largura de cada trincheira
+        self.trench_spacing = 1200  # Espaçamento entre trincheiras
+        self.game_won = False  # Estado de vitória do jogo
         
         # Carregando texturas
         script_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(script_dir)
+        
+        # Carregar texturas dos corações e munição
+        try:
+            # Carregar corações
+            self.full_heart_img = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'suit_hearts.png')).convert_alpha()
+            self.empty_heart_img = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'suit_hearts_broken.png')).convert_alpha()
+            heart_size = (30, 30)  # Tamanho dos corações na UI
+            self.full_heart_img = pygame.transform.scale(self.full_heart_img, heart_size)
+            self.empty_heart_img = pygame.transform.scale(self.empty_heart_img, heart_size)
+            
+            # Carregar símbolo de munição
+            self.ammo_symbol_img = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'municao_simbolo.png')).convert_alpha()
+            self.ammo_symbol_img = pygame.transform.scale(self.ammo_symbol_img, (40, 40))  # Tamanho do símbolo de munição
+        except Exception as e:
+            print(f"Erro ao carregar imagens: {e}")
+            self.full_heart_img = None
+            self.empty_heart_img = None
+            self.ammo_symbol_img = None
+            
+        # Estado inicial do jogador
+        self.reset_player()
         
         # Carrega a textura do fundo
         try:
@@ -111,17 +157,79 @@ class GameplayState:
     def reset_player(self):
         """Reinicia a posição e estado do jogador e gera o mapa inicial."""
         self.platforms.clear()
+        self.trench_positions.clear()
         self._generate_initial_platforms()
         
         # Posiciona o jogador no chão inicial
         self.player_pos = [200, self.ground_y - self.player_rect_size[1]]
         
         self.player_velocity_y = 0
+        self.player_velocity_x = 0
         self.is_jumping = False
+        self.is_wall_sliding = False
         self.facing_right = True
         self.is_game_over = False
+        self.game_won = False
         self.camera_x = 0
         self.camera_y = 0
+        
+        # Resetar vida e munição
+        self.player_hit_points = self.max_health * self.hits_per_heart
+        self.current_health = self.max_health
+        self.current_ammo = self.max_ammo
+        
+        # Limpar e recriar trincheiras e coletáveis
+        self.enemies.clear()
+        self.trenches.clear()
+        self.enemy_bullets.clear()
+        self.collectibles.clear()
+        
+        # Criar trincheiras
+        for i in range(self.num_trenches):
+            trench_x = 1000 + (i * self.trench_spacing)  # Primeira trincheira começa em x=1000
+            self.trench_positions.append(trench_x)
+            self._create_trench(trench_x)
+    
+    def _create_trench(self, x_pos):
+        """Cria uma trincheira com inimigos em posições aleatórias."""
+        num_enemies = random.randint(3, 6)  # Número aleatório de inimigos
+        trench = []
+        
+        # Criar barricada
+        barricade_height = self.player_rect_size[1] * 0.7
+        barricade_width = 20
+        platform = {
+            'rect': pygame.Rect(x_pos, self.ground_y - barricade_height, barricade_width, barricade_height),
+            'color': (100, 100, 100)  # Cor cinza para barricada
+        }
+        self.platforms.append(platform)
+        
+        # Posicionar inimigos
+        for _ in range(num_enemies):
+            is_flying = random.choice([True, False])
+            
+            if is_flying:
+                # Posição aleatória no ar
+                enemy_y = random.randint(100, int(self.screen_height * 0.6))
+            else:
+                # Posição no chão atrás da barricada
+                enemy_y = self.ground_y - 140
+                
+            enemy_x = x_pos + random.randint(barricade_width, self.trench_width - 100)
+            enemy = Enemy(enemy_x, enemy_y, is_flying)
+            self.enemies.append(enemy)
+            trench.append(enemy)
+            self.enemy_hp[enemy] = 5  # Cada inimigo começa com 5 de vida
+            
+        self.trenches.append(trench)
+        
+    def _spawn_collectible(self, x, y):
+        """Cria um coletável com 50% de chance de ser coração ou munição."""
+        if random.random() < 0.5:  # 50% de chance para cada tipo
+            collectible = Collectible(x, y, "heart")
+        else:
+            collectible = Collectible(x, y, "ammo")
+        self.collectibles.append(collectible)
 
     def _generate_initial_platforms(self):
         """Cria as plataformas flutuantes iniciais."""
@@ -140,6 +248,15 @@ class GameplayState:
         width = random.randint(self.min_platform_width, self.max_platform_width)
         
         new_x = self.last_platform_end_x + gap_x
+
+        # Check if the new platform is too close to a trench
+        for trench_x in self.trench_positions:
+            safe_zone_start = trench_x - self.trench_width * 1.5
+            safe_zone_end = trench_x + self.trench_width
+            if (new_x < safe_zone_end) and (new_x + width > safe_zone_start):
+                new_x = safe_zone_end
+                break
+
         new_y = self.last_floating_platform_y + gap_y
         
         # Limita a altura das plataformas para não saírem muito da tela e ficarem acima do chão
@@ -155,7 +272,7 @@ class GameplayState:
     def add_platform(self, x, y, width):
         """Adiciona uma nova plataforma à lista."""
         platform = {
-            'rect': pygame.Rect(x, y, width, 40), # Altura fixa de 40
+            'rect': pygame.Rect(x, y, width, self.platform_height), # Altura reduzida
             'color': (0,0,0) # Cor Preta
         }
         self.platforms.append(platform)
@@ -185,9 +302,16 @@ class GameplayState:
                 self.game_manager.set_state('menu')
             elif event.key == pygame.K_r and self.is_game_over:
                 self.reset_player()  # Reinicia o jogo quando R é pressionado no game over
-            elif (event.key == pygame.K_SPACE or event.key == pygame.K_w or event.key == pygame.K_UP) and not self.is_jumping and not self.is_game_over:
+            elif (event.key == pygame.K_SPACE or event.key == pygame.K_w or event.key == pygame.K_UP) and (not self.is_jumping or self.is_wall_sliding) and not self.is_game_over:
                 self.player_velocity_y = self.jump_force
                 self.is_jumping = True
+                if self.is_wall_sliding:  # Pulo na parede
+                    # Dar um pequeno impulso horizontal na direção oposta à parede
+                    if self.facing_right:
+                        self.player_velocity_x = -self.max_speed * 0.8
+                    else:
+                        self.player_velocity_x = self.max_speed * 0.8
+                    self.is_wall_sliding = False
             elif event.key == pygame.K_F11:
                 # Alternar entre fullscreen e windowed
                 if pygame.display.get_surface().get_flags() & pygame.FULLSCREEN:
@@ -202,13 +326,23 @@ class GameplayState:
             
         keys = pygame.key.get_pressed()
         
-        # Movimento horizontal com WASD e setas
+        # Movimento horizontal com WASD e setas com aceleração
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            self.player_pos[0] -= self.player_speed
+            self.player_velocity_x -= self.player_speed
             self.facing_right = False
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            self.player_pos[0] += self.player_speed
+            self.player_velocity_x += self.player_speed
             self.facing_right = True
+            
+        # Limitar velocidade máxima
+        self.player_velocity_x = max(-self.max_speed, min(self.max_speed, self.player_velocity_x))
+        
+        # Aplicar atrito
+        if not (keys[pygame.K_LEFT] or keys[pygame.K_a] or keys[pygame.K_RIGHT] or keys[pygame.K_d]):
+            self.player_velocity_x *= self.friction
+            
+        # Atualizar posição horizontal
+        self.player_pos[0] += self.player_velocity_x
             
         # Atualizar direção da mira
         self.aim_direction = [0, 0]
@@ -227,11 +361,10 @@ class GameplayState:
             self.aim_direction = [1 if self.facing_right else -1, 0]
             
         # Sistema de tiro automático
-        if keys[pygame.K_x]:  # Verifica se X está sendo segurado
+        if keys[pygame.K_x] and self.current_ammo > 0:  # Verifica se X está sendo segurado e tem munição
             current_time = pygame.time.get_ticks()
             if current_time - self.last_shot_time > self.shot_cooldown:
                 # Criar novo projétil
-                # --- CORREÇÃO: Posição da bala alinhada com a arma ---
                 if self.facing_right:
                     offset_x, offset_y = self.gun_barrel_offset_right
                 else:
@@ -255,50 +388,83 @@ class GameplayState:
                     'direction_x': normalized_dir[0],
                     'direction_y': normalized_dir[1]
                 })
+                self.current_ammo -= 1  # Diminui a munição
                 self.last_shot_time = current_time
             
         # Aplicar gravidade
         self.player_velocity_y += self.gravity
         self.player_pos[1] += self.player_velocity_y
         
-        # --- CORREÇÃO: Lógica de colisão separada para chão infinito e plataformas ---
         player_rect = pygame.Rect(self.player_pos[0], self.player_pos[1], self.player_rect_size[0], self.player_rect_size[1])
         
         # 1. Verificar colisão com as plataformas flutuantes
+        self.is_wall_sliding = False
         for platform in self.platforms:
             collidable_rect = platform['rect']
             if player_rect.colliderect(collidable_rect):
-                # Colisão por cima (pousando)
-                if self.player_velocity_y > 0 and player_rect.bottom > collidable_rect.top:
+                overlap_left = player_rect.right - collidable_rect.left
+                overlap_right = collidable_rect.right - player_rect.left
+                overlap_top = player_rect.bottom - collidable_rect.top
+                overlap_bottom = collidable_rect.bottom - player_rect.top
+                
+                min_overlap = min(overlap_left, overlap_right, overlap_top, overlap_bottom)
+                
+                if min_overlap == overlap_top and self.player_velocity_y > 0:
                     player_rect.bottom = collidable_rect.top
                     self.player_pos[1] = player_rect.y
                     self.player_velocity_y = 0
                     self.is_jumping = False
-                # Colisão por baixo (batendo a cabeça)
-                elif self.player_velocity_y < 0 and player_rect.top < collidable_rect.bottom:
+                
+                elif min_overlap == overlap_bottom and self.player_velocity_y < 0:
                     player_rect.top = collidable_rect.bottom
                     self.player_pos[1] = player_rect.y
                     self.player_velocity_y = 0
+                
+                elif min_overlap == overlap_left:
+                    player_rect.right = collidable_rect.left
+                    self.player_pos[0] = player_rect.x
+                    if self.player_velocity_y > 0:
+                        self.is_wall_sliding = True
+                        self.player_velocity_y = min(self.player_velocity_y, self.wall_slide_speed)
+                    self.player_velocity_x = 0
+                
+                elif min_overlap == overlap_right:
+                    player_rect.left = collidable_rect.right
+                    self.player_pos[0] = player_rect.x
+                    if self.player_velocity_y > 0:
+                        self.is_wall_sliding = True
+                        self.player_velocity_y = min(self.player_velocity_y, self.wall_slide_speed)
+                    self.player_velocity_x = 0
         
-        # 2. Verificar colisão com o chão (que agora é infinito)
-        # A condição `self.player_velocity_y >= 0` previne que o jogador seja "puxado" para o chão se ele pulou de uma plataforma baixa.
         if player_rect.bottom >= self.ground_y and self.player_velocity_y >= 0:
             player_rect.bottom = self.ground_y
             self.player_pos[1] = player_rect.y
             self.player_velocity_y = 0
             self.is_jumping = False
         
-        # Atualizar projéteis
+        # Atualizar projéteis do jogador e verificar colisões com inimigos
         for bullet in self.bullets[:]:
             bullet['pos'][0] += self.bullet_speed * bullet['direction_x']
             bullet['pos'][1] += self.bullet_speed * bullet['direction_y']
 
-            # --- CORREÇÃO: Remover projéteis que saíram da VISTA DA CÂMERA ---
-            # A posição do projétil está em coordenadas do mundo. O código antigo comparava
-            # com o tamanho da tela (ex: 1920), fazendo com que os tiros desaparecessem
-            # assim que o jogador passasse dessa coordenada no mapa.
-            # A forma correta é comparar com os limites da câmera no mundo do jogo.
-            margin = 200 # Margem para garantir que o projétil suma bem fora da tela
+            bullet_collided = False
+            for enemy in self.enemies[:]:
+                enemy_rect = pygame.Rect(enemy.pos[0], enemy.pos[1], enemy.size[0], enemy.size[1])
+                bullet_rect = pygame.Rect(bullet['pos'][0] - self.bullet_size, bullet['pos'][1] - self.bullet_size, self.bullet_size * 2, self.bullet_size * 2)
+                if enemy_rect.colliderect(bullet_rect):
+                    bullet_collided = True
+                    self.enemy_hp[enemy] -= 1
+                    if self.enemy_hp[enemy] <= 0:
+                        self._spawn_collectible(enemy.pos[0], enemy.pos[1])
+                        self.enemies.remove(enemy)
+                        del self.enemy_hp[enemy]
+                    break
+            
+            if bullet_collided:
+                self.bullets.remove(bullet)
+                continue
+
+            margin = 200
             camera_view_left = self.camera_x - margin
             camera_view_right = self.camera_x + self.screen_width + margin
 
@@ -307,21 +473,75 @@ class GameplayState:
             elif bullet['pos'][1] < -margin or bullet['pos'][1] > self.screen_height + margin:
                 self.bullets.remove(bullet)
 
-        # --- LÓGICA DA CÂMERA ATUALIZADA ---
-        # O alvo da câmera é calculado para que o centro do jogador fique no centro da tela.
+        # Atualizar inimigos
+        current_time = pygame.time.get_ticks()
+        for enemy in self.enemies:
+            enemy.update(self.player_pos)
+            bullet = enemy.shoot(self.player_pos, current_time)
+            if bullet:
+                self.enemy_bullets.append(bullet)
+
+        # Atualizar projéteis inimigos
+        for bullet in self.enemy_bullets[:]:
+            bullet['pos'][0] += 15 * bullet['direction'][0]
+            bullet['pos'][1] += 15 * bullet['direction'][1]
+            
+            bullet_rect = pygame.Rect(bullet['pos'][0] - 5, bullet['pos'][1] - 5, 10, 10)
+
+            # Checar colisão com plataformas
+            bullet_collided = False
+            for platform in self.platforms:
+                if platform['rect'].colliderect(bullet_rect):
+                    self.enemy_bullets.remove(bullet)
+                    bullet_collided = True
+                    break
+            if bullet_collided:
+                continue
+
+            if (bullet['pos'][0] < self.camera_x - 100 or 
+                bullet['pos'][0] > self.camera_x + self.screen_width + 100 or
+                bullet['pos'][1] < -100 or bullet['pos'][1] > self.screen_height + 100):
+                self.enemy_bullets.remove(bullet)
+                continue
+            
+            if bullet_rect.colliderect(player_rect):
+                self.player_hit_points -= 1
+                self.current_health = math.ceil(self.player_hit_points / self.hits_per_heart)
+                self.enemy_bullets.remove(bullet)
+                if self.player_hit_points <= 0:
+                    self.game_over()
+
+        # Atualizar coletáveis
+        for collectible in self.collectibles[:]:
+            collectible.update(self.platforms, self.ground_y)
+            if collectible.rect.colliderect(player_rect):
+                if collectible.type == "heart" and self.player_hit_points < self.max_health * self.hits_per_heart:
+                    self.player_hit_points = min(self.player_hit_points + self.hits_per_heart, self.max_health * self.hits_per_heart)
+                    self.current_health = math.ceil(self.player_hit_points / self.hits_per_heart)
+                    self.collectibles.remove(collectible)
+                elif collectible.type == "ammo":
+                    self.current_ammo += 20
+                    self.collectibles.remove(collectible)
+            if collectible.pos[1] > self.screen_height * 2:
+                self.collectibles.remove(collectible)
+
+        # Lógica da câmera
         player_center_x = self.player_pos[0] + self.player_rect_size[0] / 2
         target_x = player_center_x - self.screen_width / 2
-
-        # A suavização da câmera torna o movimento mais fluido.
         camera_smoothness_x = 0.1
         self.camera_x += (target_x - self.camera_x) * camera_smoothness_x
-        self.camera_y = 0  # Mantém a câmera fixa verticalmente
+        self.camera_y = 0
         
-        # --- NOVO: Gerenciamento de plataformas ---
         self._manage_platforms()
         
-        # Verificar game over (caiu do mapa)
-        if self.player_pos[1] > self.screen_height * 1.5:  # Margem para queda
+        if self.player_pos[0] < 200:
+            self.player_pos[0] = 200
+            self.player_velocity_x = max(0, self.player_velocity_x)
+
+        if self.camera_x > (len(self.trenches) + 1) * self.trench_spacing:
+            self.game_won = True
+        
+        if self.player_pos[1] > self.screen_height * 1.5:
             self.game_over()
 
 
@@ -360,6 +580,50 @@ class GameplayState:
             platform_rect_on_screen = platform['rect'].move(camera_offset_x, camera_offset_y)
             if platform_rect_on_screen.colliderect(screen_rect): # Otimização para desenhar só o visível
                 pygame.draw.rect(screen, platform['color'], platform_rect_on_screen)
+                
+        # Desenhar coletáveis
+        for collectible in self.collectibles:
+            collectible.draw(screen, camera_offset_x, camera_offset_y)
+            
+        # Desenhar UI - Corações de vida
+        heart_spacing = 35  # Espaçamento entre os corações
+        for i in range(self.max_health):
+            heart_x = 10 + (i * heart_spacing)
+            heart_y = 10
+            if i < self.current_health:
+                screen.blit(self.full_heart_img, (heart_x, heart_y))
+            else:
+                screen.blit(self.empty_heart_img, (heart_x, heart_y))
+                
+        # Desenhar contador de munição no canto superior direito
+        if self.ammo_symbol_img:
+            # Posicionar o símbolo de munição no canto superior direito
+            ammo_symbol_x = self.screen_width - 120
+            ammo_symbol_y = 10
+            screen.blit(self.ammo_symbol_img, (ammo_symbol_x, ammo_symbol_y))
+            
+            # Desenhar o número de balas ao lado do símbolo
+            font = pygame.font.Font(None, 36)
+            ammo_text = str(self.current_ammo)
+            ammo_surface = font.render(ammo_text, True, (255, 255, 255))
+            screen.blit(ammo_surface, (ammo_symbol_x + 50, ammo_symbol_y + 10))
+                
+        # Desenhar inimigos
+        for enemy in self.enemies:
+            enemy.draw(screen, camera_offset_x, camera_offset_y)
+            
+        # Desenhar lasers inimigos
+        for bullet in self.enemy_bullets:
+            # Desenhar o laser como uma linha vermelha brilhante
+            start_pos = (int(bullet['pos'][0] + camera_offset_x), 
+                        int(bullet['pos'][1] + camera_offset_y))
+            end_pos = (int(bullet['pos'][0] - bullet['direction'][0] * 20 + camera_offset_x),
+                      int(bullet['pos'][1] - bullet['direction'][1] * 20 + camera_offset_y))
+            
+            # Desenhar o brilho externo do laser
+            pygame.draw.line(screen, (255, 100, 100), start_pos, end_pos, 4)
+            # Desenhar o núcleo brilhante do laser
+            pygame.draw.line(screen, (255, 255, 255), start_pos, end_pos, 2)
         
         # Desenhar projéteis
         for bullet in self.bullets:

@@ -33,11 +33,11 @@ class MapManager:
         """Mapa para testar diferentes tipos de plataformas"""
         # Chão
         self.add_platform(0, self.screen_height - 40, self.screen_width, 40)
-        
+    
         # Escada de plataformas (altura entre plataformas reduzida)
         for i in range(5):
             x = 100 + (i * 200)
-            y = self.screen_height - 100 - (i * 80)  # Reduzido de 100 para 80 de altura entre plataformas
+            y = self.screen_height - 90 - (i * 70)  # Reduzido de 100 para 80 de altura entre plataformas
             self.add_platform(x, y, 150, 20)
             
     def add_platform(self, x, y, width, height, platform_type="normal"):

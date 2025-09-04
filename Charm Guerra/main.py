@@ -43,7 +43,7 @@ def main():
     # Carregue e toque a música do menu aqui
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        music_file = os.path.join(script_dir, 'assets', 'audio', 'sounds', 'background_music.mp3')
+        music_file = os.path.join(script_dir, 'assets', 'sounds', 'background_music.mp3')
         pygame.mixer.music.load(music_file)
         pygame.mixer.music.set_volume(game_manager.volume) # Define o volume inicial
         pygame.mixer.music.play(-1) # -1 para tocar em loop infinito
