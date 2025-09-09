@@ -102,6 +102,19 @@ class MenuState:
         sys.exit()
 
     def enter(self):
+        # --- PONTO DE MODIFICAÇÃO: MÚSICA DO MENU ---
+        # Garante que o caminho para a música está correto.
+        # Coloque sua música em assets/sounds/menu_music.mp3
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(script_dir)
+            music_path = os.path.join(project_root, 'assets', 'sounds', 'menu_music.mp3')
+            pygame.mixer.music.load(music_path)
+            pygame.mixer.music.set_volume(self.game_manager.volume)
+            pygame.mixer.music.play(-1)  # Toca em loop
+        except pygame.error as e:
+            print(f"AVISO: Erro ao carregar ou tocar a música do menu '{music_path}': {e}")
+            
         # Atualiza o texto dos botões caso o idioma tenha mudado
         # Tenta renderizar com a fonte configurada; se falhar, usa SysFont como fallback.
         for i, key in enumerate(['start_game', 'settings', 'exit_game']):
@@ -116,6 +129,9 @@ class MenuState:
                 self.buttons[i].text_surface = fallback_font.render(self.buttons[i].text, True, (255, 255, 255))
                 self.buttons[i].text_rect = self.buttons[i].text_surface.get_rect(center=self.buttons[i].rect.center)
 
+    def exit(self):
+        # Para a música quando sai do estado do menu
+        pygame.mixer.music.stop()
 
     def handle_event(self, event):
         for button in self.buttons:

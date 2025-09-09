@@ -5,6 +5,13 @@ import math
 from .map_manager import MapManager
 from .enemy import Enemy
 from .collectible import Collectible
+import os
+import pygame
+import random
+import math
+from .map_manager import MapManager
+from .enemy import Enemy
+from .collectible import Collectible
 
 class GameplayState:
     def __init__(self, game_manager, screen_width, screen_height):

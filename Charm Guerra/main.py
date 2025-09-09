@@ -10,7 +10,7 @@ from game_states.gameplay_state import GameplayState
 from game_states.settings_state import SettingsState
 
 # --- CONFIGURAÇÕES DA TELA ---
-FPS = 60 # Frames por segundo
+FPS = 90 # Frames por segundo
 
 def main():
     pygame.init()
