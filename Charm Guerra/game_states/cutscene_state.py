@@ -102,6 +102,9 @@ class CutsceneState:
         return surface
 
     def enter(self):
+        # Para a música do menu ao entrar na cutscene
+        pygame.mixer.music.stop()
+
         self.current_frame_index = 0
         self.last_frame_time = pygame.time.get_ticks()
         # Se o modo for 'video' (imageio reader), inicia o temporizador
@@ -211,4 +214,3 @@ class CutsceneState:
         else:
             # placeholder
             screen.blit(self.frames[0], (0, 0))
-

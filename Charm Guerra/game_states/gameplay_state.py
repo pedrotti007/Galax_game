@@ -25,17 +25,17 @@ class GameplayState:
         self.player_velocity_x = 0  # Velocidade horizontal do jogador
         self.is_wall_sliding = False  # Estado de deslizamento na parede
         
-        # --- Sistema de Geração de Plataformas Flutuantes ---
+        # --- Plataformas (usado para barricadas) ---
         self.platforms = []
-        # Parâmetros de geração (ajuste para mudar a dificuldade)
-        self.min_platform_width = 150
-        self.max_platform_width = 300
-        self.min_gap_x = 300  # Gaps menores para facilitar o pulo
-        self.max_gap_x = 500  # Gaps menores para facilitar o pulo
-        self.min_gap_y = -80  # Menor variação vertical
-        self.max_gap_y = 80   # Menor variação vertical
-        self.platform_height = 20  # Altura reduzida das plataformas
-        self.last_platform_end_x = 0
+        # # Parâmetros de geração de plataformas flutuantes (desativado)
+        # self.min_platform_width = 150
+        # self.max_platform_width = 300
+        # self.min_gap_x = 300
+        # self.max_gap_x = 500
+        # self.min_gap_y = -80
+        # self.max_gap_y = 80
+        # self.platform_height = 20
+        # self.last_platform_end_x = 0
         
         # --- NOVO: Chão Fixo ---
         self.ground_y = self.screen_height - 60
@@ -62,9 +62,9 @@ class GameplayState:
         self.trenches = []  # Lista de trincheiras (cada uma é um grupo de inimigos)
         self.trench_positions = [] # Posições X das trincheiras
         self.enemy_bullets = []  # Lista de tiros dos inimigos
-        self.num_trenches = 3  # Número de trincheiras antes do boss
+        self.num_trenches = 4  # Número de trincheiras antes do boss
         self.trench_width = 400  # Largura de cada trincheira
-        self.trench_spacing = 1200  # Espaçamento entre trincheiras
+        self.trench_spacing = 6000  # Espaçamento entre trincheiras
         self.game_won = False  # Estado de vitória do jogo
         
         # Carregando texturas
@@ -121,6 +121,16 @@ class GameplayState:
             print(f"Erro ao carregar player.png: {e}")
             self.player_image = None
         
+        # --- PONTO DE MODIFICAÇÃO: Carregar som de tiro ---
+        # Coloque seu arquivo de som em assets/sounds/laser_shot.wav
+        self.shot_sound = None
+        try:
+            # Para efeitos sonoros, o formato .wav é mais recomendado por ser mais rápido de carregar.
+            # Renomeie ou converta seu arquivo 'gun.mp3' para 'laser_shot.wav'.
+            self.shot_sound = pygame.mixer.Sound(os.path.join(project_root, 'assets', 'sounds', 'laser_shot.wav'))
+        except pygame.error as e:
+            print(f"AVISO: Não foi possível carregar o som de tiro 'laser_shot.wav'. Verifique se o arquivo existe e está no formato correto. Erro: {e}")
+        
         # Sistema de tiro
         self.bullets = []
         self.bullet_speed = 20  # Aumentado para tiros mais rápidos
@@ -158,7 +168,7 @@ class GameplayState:
         """Reinicia a posição e estado do jogador e gera o mapa inicial."""
         self.platforms.clear()
         self.trench_positions.clear()
-        self._generate_initial_platforms()
+        # self._generate_initial_platforms() # Geração de plataformas flutuantes desativada
         
         # Posiciona o jogador no chão inicial
         self.player_pos = [200, self.ground_y - self.player_rect_size[1]]
@@ -231,60 +241,60 @@ class GameplayState:
             collectible = Collectible(x, y, "ammo")
         self.collectibles.append(collectible)
 
-    def _generate_initial_platforms(self):
-        """Cria as plataformas flutuantes iniciais."""
-        # Começa a gerar plataformas um pouco à frente do jogador
-        self.last_platform_end_x = 400
-        self.last_floating_platform_y = self.ground_y - 150
+    # def _generate_initial_platforms(self):
+    #     """Cria as plataformas flutuantes iniciais."""
+    #     # Começa a gerar plataformas um pouco à frente do jogador
+    #     self.last_platform_end_x = 400
+    #     self.last_floating_platform_y = self.ground_y - 150
 
-        # Gera algumas plataformas iniciais para preencher a tela
-        while self.last_platform_end_x < self.screen_width * 2:
-            self._generate_next_platform()
+    #     # Gera algumas plataformas iniciais para preencher a tela
+    #     while self.last_platform_end_x < self.screen_width * 2:
+    #         self._generate_next_platform()
 
-    def _generate_next_platform(self):
-        """Gera uma única plataforma nova à frente da última."""
-        gap_x = random.randint(self.min_gap_x, self.max_gap_x)
-        gap_y = random.randint(self.min_gap_y, self.max_gap_y)
-        width = random.randint(self.min_platform_width, self.max_platform_width)
+    # def _generate_next_platform(self):
+    #     """Gera uma única plataforma nova à frente da última."""
+    #     gap_x = random.randint(self.min_gap_x, self.max_gap_x)
+    #     gap_y = random.randint(self.min_gap_y, self.max_gap_y)
+    #     width = random.randint(self.min_platform_width, self.max_platform_width)
         
-        new_x = self.last_platform_end_x + gap_x
+    #     new_x = self.last_platform_end_x + gap_x
 
-        # Check if the new platform is too close to a trench
-        for trench_x in self.trench_positions:
-            safe_zone_start = trench_x - self.trench_width * 1.5
-            safe_zone_end = trench_x + self.trench_width
-            if (new_x < safe_zone_end) and (new_x + width > safe_zone_start):
-                new_x = safe_zone_end
-                break
+    #     # Check if the new platform is too close to a trench
+    #     for trench_x in self.trench_positions:
+    #         safe_zone_start = trench_x - self.trench_width * 1.5
+    #         safe_zone_end = trench_x + self.trench_width
+    #         if (new_x < safe_zone_end) and (new_x + width > safe_zone_start):
+    #             new_x = safe_zone_end
+    #             break
 
-        new_y = self.last_floating_platform_y + gap_y
+    #     new_y = self.last_floating_platform_y + gap_y
         
-        # Limita a altura das plataformas para não saírem muito da tela e ficarem acima do chão
-        # --- CORREÇÃO: Força as plataformas a aparecerem mais para cima ---
-        top_limit = self.screen_height * 0.1 # 30% do topo da tela
-        bottom_limit = self.screen_height * 0.6 # Limite inferior para não ficarem muito baixas
-        new_y = max(top_limit, min(new_y, bottom_limit))
+    #     # Limita a altura das plataformas para não saírem muito da tela e ficarem acima do chão
+    #     # --- CORREÇÃO: Força as plataformas a aparecerem mais para cima ---
+    #     top_limit = self.screen_height * 0.1 # 30% do topo da tela
+    #     bottom_limit = self.screen_height * 0.6 # Limite inferior para não ficarem muito baixas
+    #     new_y = max(top_limit, min(new_y, bottom_limit))
         
-        self.add_platform(new_x, new_y, width)
-        self.last_platform_end_x = new_x + width
-        self.last_floating_platform_y = new_y
+    #     self.add_platform(new_x, new_y, width)
+    #     self.last_platform_end_x = new_x + width
+    #     self.last_floating_platform_y = new_y
 
-    def add_platform(self, x, y, width):
-        """Adiciona uma nova plataforma à lista."""
-        platform = {
-            'rect': pygame.Rect(x, y, width, self.platform_height), # Altura reduzida
-            'color': (0,0,0) # Cor Preta
-        }
-        self.platforms.append(platform)
+    # def add_platform(self, x, y, width):
+    #     """Adiciona uma nova plataforma à lista."""
+    #     platform = {
+    #         'rect': pygame.Rect(x, y, width, self.platform_height), # Altura reduzida
+    #         'color': (0,0,0) # Cor Preta
+    #     }
+    #     self.platforms.append(platform)
 
-    def _manage_platforms(self):
-        """Verifica se precisa gerar novas plataformas e remove as antigas."""
-        # Gera novas plataformas se a última estiver entrando na tela
-        if self.last_platform_end_x < self.camera_x + self.screen_width * 1.5:
-            self._generate_next_platform()
+    # def _manage_platforms(self):
+    #     """Verifica se precisa gerar novas plataformas e remove as antigas."""
+    #     # Gera novas plataformas se a última estiver entrando na tela
+    #     if self.last_platform_end_x < self.camera_x + self.screen_width * 1.5:
+    #         self._generate_next_platform()
             
-        # Remove plataformas antigas que já saíram completamente da tela
-        self.platforms = [p for p in self.platforms if p['rect'].right > self.camera_x - 200]
+    #     # Remove plataformas antigas que já saíram completamente da tela
+    #     self.platforms = [p for p in self.platforms if p['rect'].right > self.camera_x - 200]
         
     def game_over(self):
         """Ativa o estado de game over"""
@@ -364,6 +374,12 @@ class GameplayState:
         if keys[pygame.K_x] and self.current_ammo > 0:  # Verifica se X está sendo segurado e tem munição
             current_time = pygame.time.get_ticks()
             if current_time - self.last_shot_time > self.shot_cooldown:
+                # --- PONTO DE MODIFICAÇÃO: Tocar som de tiro ---
+                # Toca o som do tiro e ajusta o volume de acordo com as configurações
+                if self.shot_sound:
+                    self.shot_sound.set_volume(self.game_manager.volume)
+                    self.shot_sound.play()
+
                 # Criar novo projétil
                 if self.facing_right:
                     offset_x, offset_y = self.gun_barrel_offset_right
@@ -532,7 +548,7 @@ class GameplayState:
         self.camera_x += (target_x - self.camera_x) * camera_smoothness_x
         self.camera_y = 0
         
-        self._manage_platforms()
+        # self._manage_platforms() # Gerenciamento de plataformas flutuantes desativado
         
         if self.player_pos[0] < 200:
             self.player_pos[0] = 200

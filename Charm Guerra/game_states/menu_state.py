@@ -13,12 +13,15 @@ class MenuState:
         self.screen_height = screen_height
 
         # --- PONTO DE MODIFICAÇÃO: IMAGEM DE FUNDO ---
-        # Certifique-se de que o caminho para a imagem está correto.
-        # Coloque sua imagem em assets/images/background_menu.png
         self.background_image = None # Garante que o atributo sempre exista
+        self.music_file = None # Garante que o atributo sempre exista
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(script_dir)
+            # Carrega o caminho da música
+            # Para música de fundo, o formato .ogg é o mais recomendado para Pygame.
+            # Converta seu arquivo 'background_music.mp3' para 'background_music.ogg'.
+            self.music_file = os.path.join(project_root, 'assets', 'sounds', 'background_music.ogg')
             image_path = os.path.join(project_root, 'assets', 'images', 'background_menu.png')
             self.background_image = pygame.image.load(image_path).convert()
             self.background_image = pygame.transform.scale(self.background_image, (screen_width, screen_height))
@@ -102,6 +105,15 @@ class MenuState:
         sys.exit()
 
     def enter(self):
+        # Inicia a música do menu quando este estado é ativado
+        try:
+            if self.music_file and os.path.exists(self.music_file):
+                pygame.mixer.music.load(self.music_file)
+                pygame.mixer.music.set_volume(self.game_manager.volume)
+                pygame.mixer.music.play(-1) # Toca em loop infinito
+        except pygame.error as e:
+            print(f"Erro ao carregar ou tocar a música do menu: {e}")
+
         # Atualiza o texto dos botões caso o idioma tenha mudado
         # Tenta renderizar com a fonte configurada; se falhar, usa SysFont como fallback.
         for i, key in enumerate(['start_game', 'settings', 'exit_game']):

@@ -10,7 +10,7 @@ from game_states.gameplay_state import GameplayState
 from game_states.settings_state import SettingsState
 
 # --- CONFIGURAÇÕES DA TELA ---
-FPS = 60 # Frames por segundo
+FPS = 90 # Frames por segundo
 
 def main():
     pygame.init()
@@ -38,17 +38,6 @@ def main():
 
     clock = pygame.time.Clock()
     running = True
-
-    # --- PONTO DE MODIFICAÇÃO: MÚSICA DE FUNDO DO MENU ---
-    # Carregue e toque a música do menu aqui
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        music_file = os.path.join(script_dir, 'assets', 'sounds', 'background_music.mp3')
-        pygame.mixer.music.load(music_file)
-        pygame.mixer.music.set_volume(game_manager.volume) # Define o volume inicial
-        pygame.mixer.music.play(-1) # -1 para tocar em loop infinito
-    except pygame.error as e:
-        print(f"Erro ao carregar música de fundo: {e}")
 
     while running:
         for event in pygame.event.get():
