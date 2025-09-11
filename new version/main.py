@@ -1,8 +1,7 @@
-# main.py
-
+# main.pyc
+# pyright: ignore[reportMissingImports]
 import pygame
 import sys
-import os
 from utils.game_manager import GameManager
 from game_states.menu_state import MenuState
 from game_states.cutscene_state import CutsceneState
@@ -32,7 +31,7 @@ def main():
     game_manager.add_state('cutscene', CutsceneState(game_manager, SCREEN_WIDTH, SCREEN_HEIGHT))
     game_manager.add_state('gameplay', GameplayState(game_manager, SCREEN_WIDTH, SCREEN_HEIGHT))
     game_manager.add_state('settings', SettingsState(game_manager, SCREEN_WIDTH, SCREEN_HEIGHT))
-
+    game_manager.add_state('boss_fight', GameplayState(game_manager, SCREEN_WIDTH, SCREEN_HEIGHT, is_boss_fight=True)) # Estado para a luta contra o chefe
     # Define o estado inicial do jogo
     game_manager.set_state('menu')
 

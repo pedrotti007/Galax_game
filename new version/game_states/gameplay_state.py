@@ -7,11 +7,12 @@ from .enemy import Enemy
 from .collectible import Collectible
 
 class GameplayState:
-    def __init__(self, game_manager, screen_width, screen_height):
+    def __init__(self, game_manager, screen_width, screen_height, is_boss_fight=False):
         self.game_manager = game_manager
         self.screen_width = screen_width
         self.screen_height = screen_height
-
+        self.is_boss_fight = is_boss_fight
+        
         # Configurações do jogador
         self.player_rect_size = (120, 220)  # Hitbox do jogador, um pouco menor para colisões mais permissivas
         self.player_visual_size = (225, 240)  # Tamanho visual do sprite (ex: 3x o tamanho original)
@@ -64,9 +65,18 @@ class GameplayState:
         self.enemy_bullets = []  # Lista de tiros dos inimigos
         self.num_trenches = 4  # Número de trincheiras antes do boss
         self.trench_width = 400  # Largura de cada trincheira
-        self.trench_spacing = 6000  # Espaçamento entre trincheiras
+        self.trench_spacing = 3000  # Espaçamento entre trincheiras (valor reduzido)
         self.game_won = False  # Estado de vitória do jogo
         
+        # --- NOVO: Área do Chefe e Transição ---
+        self.boss_area_start_x = 0  # Posição X onde a área do chefe começa
+        self.door_rect = None  # Retângulo de colisão para a porta da nave
+        self.is_fading_to_black = False
+        self.fade_alpha = 0  # Nível de transparência para o fade
+        self.loading_screen_active = False
+        self.loading_timer_start = 0
+        self.loading_duration = 3000  # 3 segundos de tela de carregamento
+
         # Carregando texturas
         script_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(script_dir)
@@ -92,26 +102,50 @@ class GameplayState:
         # Estado inicial do jogador
         self.reset_player()
         
-        # Carrega a textura do fundo
+        # --- NOVO: Carrega o fundo com base no modo de jogo ---
+        if self.is_boss_fight:
+            try:
+                # Carrega o fundo da nave para a arena do chefe
+                self.background_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'fundo_nave.png')).convert()
+                self.background_image = pygame.transform.scale(self.background_image, (self.screen_width, self.screen_height))
+            except Exception as e:
+                print(f"Erro ao carregar fundo_nave.png: {e}")
+                self.background_image = pygame.Surface((screen_width, screen_height))
+                self.background_image.fill((20, 0, 30)) # Fallback para um roxo escuro
+        else:
+            # Carrega o fundo normal para a fase de rolagem
+            try:
+                self.background_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'game_background.png')).convert()
+                
+                original_aspect = self.background_image.get_width() / self.background_image.get_height()
+                new_height = screen_height
+                new_width = int(new_height * original_aspect)
+                
+                self.background_image = pygame.transform.scale(self.background_image, (new_width, new_height))
+                
+                self.background_width = new_width
+                self.background_height = new_height
+            except Exception as e:
+                print(f"Erro ao carregar game_background.png: {e}")
+                self.background_image = pygame.Surface((screen_width, screen_height))
+                self.background_image.fill((135, 206, 235))
+                self.background_width = screen_width
+                self.background_height = screen_height
+
+        # --- NOVO: Carrega a textura da nave (área do chefe) ---
         try:
-            self.background_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'game_background.png')).convert()
+            self.boss_background_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'nave_background.png')).convert()
             
             # Ajusta a altura para ser exatamente a altura da tela
-            original_aspect = self.background_image.get_width() / self.background_image.get_height()
+            original_aspect = self.boss_background_image.get_width() / self.boss_background_image.get_height()
             new_height = screen_height
-            new_width = int(new_height * original_aspect)  # Mantém a proporção original
-            
-            self.background_image = pygame.transform.scale(self.background_image, (new_width, new_height))
-            
-            # Guarda as dimensões do background para uso no scrolling
-            self.background_width = new_width
-            self.background_height = new_height
+            new_width = int(new_height * original_aspect)
+            self.boss_background_image = pygame.transform.scale(self.boss_background_image, (new_width, new_height))
+            self.boss_background_width = new_width
         except Exception as e:
-            print(f"Erro ao carregar game_background.png: {e}")
-            self.background_image = pygame.Surface((screen_width, screen_height))
-            self.background_image.fill((135, 206, 235))  # Fallback para azul céu
-            self.background_width = screen_width
-            self.background_height = screen_height
+            print(f"Erro ao carregar fundo_nave.png: {e}")
+            self.boss_background_image = pygame.Surface((screen_width, screen_height))
+            self.boss_background_image.fill((20, 0, 30)) # Fallback para um roxo escuro
             
         # Carrega a textura do player
         try:
@@ -120,6 +154,9 @@ class GameplayState:
         except Exception as e:
             print(f"Erro ao carregar player.png: {e}")
             self.player_image = None
+
+        # Fonte para a tela de carregamento
+        self.loading_font = pygame.font.Font(None, 60)
         
         # --- PONTO DE MODIFICAÇÃO: Carregar som de tiro ---
         # Coloque seu arquivo de som em assets/sounds/laser_shot.wav
@@ -182,6 +219,10 @@ class GameplayState:
         self.game_won = False
         self.camera_x = 0
         self.camera_y = 0
+
+        self.is_fading_to_black = False
+        self.fade_alpha = 0
+        self.loading_screen_active = False
         
         # Resetar vida e munição
         self.player_hit_points = self.max_health * self.hits_per_heart
@@ -194,11 +235,22 @@ class GameplayState:
         self.enemy_bullets.clear()
         self.collectibles.clear()
         
-        # Criar trincheiras
-        for i in range(self.num_trenches):
-            trench_x = 1000 + (i * self.trench_spacing)  # Primeira trincheira começa em x=1000
-            self.trench_positions.append(trench_x)
-            self._create_trench(trench_x)
+        # --- NOVO: Só cria o mapa procedural se não for a arena do chefe ---
+        if not self.is_boss_fight:
+            # Criar trincheiras normais
+            for i in range(self.num_trenches):
+                trench_x = 1000 + (i * self.trench_spacing)
+                self.trench_positions.append(trench_x)
+                self._create_trench(trench_x)
+
+            self.boss_area_start_x = 1000 + (self.num_trenches * self.trench_spacing)
+            self._create_boss_area()
+
+    def _create_boss_area(self):
+        """Cria a área do chefe com a porta de transição."""
+        # A "porta" agora é uma linha de gatilho invisível no início da área do chefe.
+        # O jogador colide com ela assim que alcança a coordenada X.
+        self.door_rect = pygame.Rect(self.boss_area_start_x, 0, 1, self.screen_height)
     
     def _create_trench(self, x_pos):
         """Cria uma trincheira com inimigos em posições aleatórias."""
@@ -241,61 +293,6 @@ class GameplayState:
             collectible = Collectible(x, y, "ammo")
         self.collectibles.append(collectible)
 
-    # def _generate_initial_platforms(self):
-    #     """Cria as plataformas flutuantes iniciais."""
-    #     # Começa a gerar plataformas um pouco à frente do jogador
-    #     self.last_platform_end_x = 400
-    #     self.last_floating_platform_y = self.ground_y - 150
-
-    #     # Gera algumas plataformas iniciais para preencher a tela
-    #     while self.last_platform_end_x < self.screen_width * 2:
-    #         self._generate_next_platform()
-
-    # def _generate_next_platform(self):
-    #     """Gera uma única plataforma nova à frente da última."""
-    #     gap_x = random.randint(self.min_gap_x, self.max_gap_x)
-    #     gap_y = random.randint(self.min_gap_y, self.max_gap_y)
-    #     width = random.randint(self.min_platform_width, self.max_platform_width)
-        
-    #     new_x = self.last_platform_end_x + gap_x
-
-    #     # Check if the new platform is too close to a trench
-    #     for trench_x in self.trench_positions:
-    #         safe_zone_start = trench_x - self.trench_width * 1.5
-    #         safe_zone_end = trench_x + self.trench_width
-    #         if (new_x < safe_zone_end) and (new_x + width > safe_zone_start):
-    #             new_x = safe_zone_end
-    #             break
-
-    #     new_y = self.last_floating_platform_y + gap_y
-        
-    #     # Limita a altura das plataformas para não saírem muito da tela e ficarem acima do chão
-    #     # --- CORREÇÃO: Força as plataformas a aparecerem mais para cima ---
-    #     top_limit = self.screen_height * 0.1 # 30% do topo da tela
-    #     bottom_limit = self.screen_height * 0.6 # Limite inferior para não ficarem muito baixas
-    #     new_y = max(top_limit, min(new_y, bottom_limit))
-        
-    #     self.add_platform(new_x, new_y, width)
-    #     self.last_platform_end_x = new_x + width
-    #     self.last_floating_platform_y = new_y
-
-    # def add_platform(self, x, y, width):
-    #     """Adiciona uma nova plataforma à lista."""
-    #     platform = {
-    #         'rect': pygame.Rect(x, y, width, self.platform_height), # Altura reduzida
-    #         'color': (0,0,0) # Cor Preta
-    #     }
-    #     self.platforms.append(platform)
-
-    # def _manage_platforms(self):
-    #     """Verifica se precisa gerar novas plataformas e remove as antigas."""
-    #     # Gera novas plataformas se a última estiver entrando na tela
-    #     if self.last_platform_end_x < self.camera_x + self.screen_width * 1.5:
-    #         self._generate_next_platform()
-            
-    #     # Remove plataformas antigas que já saíram completamente da tela
-    #     self.platforms = [p for p in self.platforms if p['rect'].right > self.camera_x - 200]
-        
     def game_over(self):
         """Ativa o estado de game over"""
         self.is_game_over = True
@@ -331,7 +328,25 @@ class GameplayState:
                     pygame.display.set_mode((info.current_w, info.current_h), pygame.FULLSCREEN)
 
     def update(self):
-        if self.is_game_over:
+        # --- NOVO: Lógica de transição e tela de carregamento ---
+        if self.loading_screen_active:
+            current_time = pygame.time.get_ticks()
+            # Após o tempo definido, muda para o próximo nível (ou menu, por enquanto)
+            if current_time - self.loading_timer_start > self.loading_duration:
+                print("Transição concluída! Indo para a arena do chefe.")
+                self.game_manager.set_state('boss_fight') # --- MUDANÇA AQUI ---
+            return # Pausa o jogo durante o carregamento
+
+        if self.is_fading_to_black:
+            self.fade_alpha += 5  # Aumenta a opacidade do fade
+            if self.fade_alpha >= 255:
+                self.fade_alpha = 255
+                self.is_fading_to_black = False # Termina o fade
+                self.loading_screen_active = True # Ativa a tela de carregamento
+                self.loading_timer_start = pygame.time.get_ticks()
+            return # Pausa o jogo durante o fade
+
+        if self.is_game_over: # Jogo normal pausado em game over
             return  # Não atualiza a gameplay se estiver em game over
             
         keys = pygame.key.get_pressed()
@@ -353,6 +368,15 @@ class GameplayState:
             
         # Atualizar posição horizontal
         self.player_pos[0] += self.player_velocity_x
+
+        # --- NOVO: Limitar jogador à tela na arena do chefe ---
+        if self.is_boss_fight:
+            if self.player_pos[0] < 0:
+                self.player_pos[0] = 0
+                self.player_velocity_x = 0
+            if self.player_pos[0] + self.player_rect_size[0] > self.screen_width:
+                self.player_pos[0] = self.screen_width - self.player_rect_size[0]
+                self.player_velocity_x = 0
             
         # Atualizar direção da mira
         self.aim_direction = [0, 0]
@@ -541,21 +565,32 @@ class GameplayState:
             if collectible.pos[1] > self.screen_height * 2:
                 self.collectibles.remove(collectible)
 
-        # Lógica da câmera
-        player_center_x = self.player_pos[0] + self.player_rect_size[0] / 2
-        target_x = player_center_x - self.screen_width / 2
-        camera_smoothness_x = 0.1
-        self.camera_x += (target_x - self.camera_x) * camera_smoothness_x
-        self.camera_y = 0
-        
-        # self._manage_platforms() # Gerenciamento de plataformas flutuantes desativado
-        
-        if self.player_pos[0] < 200:
-            self.player_pos[0] = 200
-            self.player_velocity_x = max(0, self.player_velocity_x)
+        # --- NOVO: Verificar colisão com a porta da nave ---
+        if self.door_rect and not self.is_fading_to_black:
+            if player_rect.colliderect(self.door_rect):
+                print("Jogador alcançou a porta! Iniciando transição...")
+                self.is_fading_to_black = True
 
-        if self.camera_x > (len(self.trenches) + 1) * self.trench_spacing:
-            self.game_won = True
+        # --- NOVO: Lógica de câmera e limites do mundo ---
+        if not self.is_boss_fight:
+            # Lógica da câmera para a fase de rolagem
+            player_center_x = self.player_pos[0] + self.player_rect_size[0] / 2
+            target_x = player_center_x - self.screen_width / 2
+            camera_smoothness_x = 0.1
+            self.camera_x += (target_x - self.camera_x) * camera_smoothness_x
+            self.camera_y = 0
+            
+            # Impede o jogador de voltar para o início do mapa
+            if self.player_pos[0] < 200:
+                self.player_pos[0] = 200
+                self.player_velocity_x = max(0, self.player_velocity_x)
+
+            if self.camera_x > (len(self.trenches) + 1) * self.trench_spacing:
+                self.game_won = True
+        else:
+            # Na arena do chefe, a câmera é fixa
+            self.camera_x = 0
+            self.camera_y = 0
         
         if self.player_pos[1] > self.screen_height * 1.5:
             self.game_over()
@@ -569,20 +604,26 @@ class GameplayState:
         camera_offset_x = int(-self.camera_x)
         camera_offset_y = int(-self.camera_y)
         
-        # Desenhar o fundo com parallax suave
-        bg_offset_x = camera_offset_x // 2  # Movimento mais lento que a câmera (parallax)
-        
-        # Calcular a posição x do background considerando o tamanho total da imagem
-        bg_x = bg_offset_x % self.background_width
-        
-        # Desenhar o background principal
-        screen.blit(self.background_image, (bg_x, 0))
-        
-        # Se necessário, desenhar uma segunda cópia para preencher a lacuna
-        if bg_x < 0:
-            screen.blit(self.background_image, (bg_x + self.background_width, 0))
-        elif bg_x > self.background_width - self.screen_width:
-            screen.blit(self.background_image, (bg_x - self.background_width, 0))
+        # --- NOVO: Lógica de desenho do fundo ---
+        if self.is_boss_fight:
+            # Na arena, desenha um fundo estático
+            screen.blit(self.background_image, (0, 0))
+        else:
+            # Na fase normal, desenha com parallax e transição
+            bg_offset_x = (camera_offset_x * 0.5) % self.background_width
+            bg_x = bg_offset_x
+            if bg_x > 0:
+                screen.blit(self.background_image, (bg_x - self.background_width, 0))
+            screen.blit(self.background_image, (bg_x, 0))
+
+            # Desenha o fundo da nave por cima durante a transição
+            if self.camera_x + self.screen_width > self.boss_area_start_x:
+                boss_bg_x = self.boss_area_start_x + camera_offset_x
+                screen.blit(self.boss_background_image, (boss_bg_x, 0))
+
+
+        # A porta da nave (door_rect) agora é um gatilho invisível e não é mais desenhada.
+
         
         # --- NOVO: Desenhar o chão fixo ---
         # Desenha um retângulo para o chão que cobre toda a largura da tela.
@@ -708,6 +749,20 @@ class GameplayState:
             
             screen.blit(text_game_over, text_game_over_rect)
             screen.blit(text_restart, text_restart_rect)
+        # --- NOVO: Desenhar a tela de fade e carregamento ---
+        elif self.is_fading_to_black or self.loading_screen_active:
+            # Superfície para o fade-out
+            fade_surface = pygame.Surface((self.screen_width, self.screen_height))
+            fade_surface.fill((0, 0, 0))
+            fade_surface.set_alpha(self.fade_alpha)
+            screen.blit(fade_surface, (0, 0))
+
+            # Texto de carregamento
+            if self.loading_screen_active:
+                loading_text = self.loading_font.render("Carregando...", True, (255, 255, 255))
+                loading_rect = loading_text.get_rect(center=(self.screen_width / 2, self.screen_height / 2))
+                screen.blit(loading_text, loading_rect)
+
         else:
             # HUD normal
             text_surface = font.render("ESPAÇO para pular, X para atirar, ESC para menu", True, (255, 255, 255))
