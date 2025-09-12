@@ -5,6 +5,7 @@ import math
 from .map_manager import MapManager
 from .enemy import Enemy
 from .collectible import Collectible
+from .boss import Boss
 
 class GameplayState:
     def __init__(self, game_manager, screen_width, screen_height, is_boss_fight=False):
@@ -47,6 +48,20 @@ class GameplayState:
         self.camera_x = 0
         self.camera_y = 0
         
+        # Sistema de vitória
+        self.game_won = False
+        self.victory_alpha = 0
+        self.victory_fade_speed = 2
+        self.show_victory_screen = False
+        self.victory_start_time = 0
+        self.victory_fade_duration = 2000  # 2 segundos para o fade
+        self.victory_text_color = (255, 215, 0)  # Dourado
+        
+        # Sistema de dano e efeito visual
+        self.damage_flash_duration = 500  # Duração do flash em milissegundos
+        self.damage_flash_start = 0  # Momento em que o último dano foi tomado
+        self.is_flashing = False  # Controle do efeito de flash
+        
         # Sistema de vida e munição
         self.max_health = 5  # Número máximo de corações
         self.hits_per_heart = 15
@@ -67,6 +82,10 @@ class GameplayState:
         self.trench_width = 400  # Largura de cada trincheira
         self.trench_spacing = 3000  # Espaçamento entre trincheiras (valor reduzido)
         self.game_won = False  # Estado de vitória do jogo
+
+        # Boss
+        self.boss = None
+        self.boss_group = pygame.sprite.Group()
         
         # --- NOVO: Área do Chefe e Transição ---
         self.boss_area_start_x = 0  # Posição X onde a área do chefe começa
@@ -245,6 +264,10 @@ class GameplayState:
 
             self.boss_area_start_x = 1000 + (self.num_trenches * self.trench_spacing)
             self._create_boss_area()
+        else:
+            # Se for a luta contra o chefe, cria o chefe
+            self.boss = Boss(self.screen_width // 2 - 100, self.ground_y - 200) # Posição inicial do chefe
+            self.boss_group.add(self.boss)
 
     def _create_boss_area(self):
         """Cria a área do chefe com a porta de transição."""
@@ -504,6 +527,17 @@ class GameplayState:
                 self.bullets.remove(bullet)
                 continue
 
+            # Check collision with boss
+            if self.is_boss_fight and self.boss:
+                boss_rect = self.boss.rect
+                bullet_rect = pygame.Rect(bullet['pos'][0] - self.bullet_size, bullet['pos'][1] - self.bullet_size, self.bullet_size * 2, self.bullet_size * 2)
+                if boss_rect.colliderect(bullet_rect):
+                    bullet_collided = True
+                    self.boss.health -= 10 # Adjust damage as needed
+                    if self.boss.health <= 0:
+                        print("Boss defeated!")
+                        self.start_victory_sequence()  # Inicia a sequência de vitória
+                    
             margin = 200
             camera_view_left = self.camera_x - margin
             camera_view_right = self.camera_x + self.screen_width + margin
@@ -513,13 +547,16 @@ class GameplayState:
             elif bullet['pos'][1] < -margin or bullet['pos'][1] > self.screen_height + margin:
                 self.bullets.remove(bullet)
 
-        # Atualizar inimigos
+        # Atualizar inimigos e chefe
         current_time = pygame.time.get_ticks()
         for enemy in self.enemies:
             enemy.update(self.player_pos)
             bullet = enemy.shoot(self.player_pos, current_time)
             if bullet:
                 self.enemy_bullets.append(bullet)
+        
+        if self.is_boss_fight and self.boss:
+            self.boss.update(self.player_pos, current_time)
 
         # Atualizar projéteis inimigos
         for bullet in self.enemy_bullets[:]:
@@ -548,6 +585,7 @@ class GameplayState:
                 self.player_hit_points -= 1
                 self.current_health = math.ceil(self.player_hit_points / self.hits_per_heart)
                 self.enemy_bullets.remove(bullet)
+                self.take_damage()  # Ativa o efeito de flash vermelho
                 if self.player_hit_points <= 0:
                     self.game_over()
 
@@ -628,8 +666,9 @@ class GameplayState:
         # --- NOVO: Desenhar o chão fixo ---
         # Desenha um retângulo para o chão que cobre toda a largura da tela.
         # Como a câmera não se move verticalmente, a posição Y é fixa em relação à tela.
-        ground_draw_y = self.ground_y + camera_offset_y
-        pygame.draw.rect(screen, self.ground_color, (0, ground_draw_y, screen.get_width(), screen.get_height() - ground_draw_y))
+        if not self.is_boss_fight:
+            ground_draw_y = self.ground_y + camera_offset_y
+            pygame.draw.rect(screen, self.ground_color, (0, ground_draw_y, screen.get_width(), screen.get_height() - ground_draw_y))
         
         # --- Desenhar plataformas flutuantes ---
         screen_rect = screen.get_rect()
@@ -716,7 +755,20 @@ class GameplayState:
             visual_offset_x = (self.player_visual_size[0] - self.player_rect_size[0]) // 2
             # O offset Y alinha a parte de baixo da imagem com a parte de baixo da hitbox, evitando que o personagem "afunde" no chão.
             visual_offset_y = self.player_visual_size[1] - self.player_rect_size[1]
+            
+            # Desenha o jogador
             screen.blit(image_to_draw, (player_screen_x - visual_offset_x, player_screen_y - visual_offset_y))
+            
+            # Aplica o efeito de flash vermelho se estiver ativo
+            if self.is_flashing:
+                current_time = pygame.time.get_ticks()
+                if current_time - self.damage_flash_start <= self.damage_flash_duration:
+                    # Criar uma superfície vermelha do mesmo tamanho da imagem
+                    flash_surface = pygame.Surface(image_to_draw.get_size(), pygame.SRCALPHA)
+                    flash_surface.fill((255, 0, 0, 100))  # Vermelho com 100 de alpha
+                    screen.blit(flash_surface, (player_screen_x - visual_offset_x, player_screen_y - visual_offset_y))
+                else:
+                    self.is_flashing = False
             
             # Desenhar hitbox para debug (comentar em produção)
             # pygame.draw.rect(screen, (255, 0, 0), pygame.Rect(
@@ -735,9 +787,54 @@ class GameplayState:
             )
             pygame.draw.rect(screen, (255, 0, 0), player_rect)
 
+        # Desenhar o chefe
+        if self.is_boss_fight and self.boss:
+            self.boss.draw(screen, camera_offset_x, camera_offset_y)
+
         # Desenhar HUD
         font = pygame.font.SysFont(None, 30)
-        if self.is_game_over:
+        if self.show_victory_screen:
+            # Calcula o progresso do fade (0 a 1)
+            current_time = pygame.time.get_ticks()
+            fade_progress = min(1.0, (current_time - self.victory_start_time) / self.victory_fade_duration)
+            fade_alpha = int(255 * fade_progress)
+            
+            # Criar superfície de fade
+            fade_surface = pygame.Surface((self.screen_width, self.screen_height))
+            fade_surface.fill((0, 0, 0))
+            fade_surface.set_alpha(fade_alpha)
+            screen.blit(fade_surface, (0, 0))
+            
+            if fade_progress >= 1.0:  # Fade completo
+                # Fonte para o texto de vitória
+                victory_font = pygame.font.SysFont(None, 100)
+                subtitle_font = pygame.font.SysFont(None, 40)
+                
+                # Textos
+                text_victory = victory_font.render("VITÓRIA!", True, self.victory_text_color)
+                text_congratulations = subtitle_font.render("Parabéns! Você derrotou o Boss!", True, self.victory_text_color)
+                text_press_key = subtitle_font.render("Pressione ENTER para continuar", True, (255, 255, 255))
+                
+                # Posicionar textos
+                text_victory_rect = text_victory.get_rect(center=(self.screen_width//2, self.screen_height//2 - 50))
+                text_congrats_rect = text_congratulations.get_rect(center=(self.screen_width//2, self.screen_height//2 + 30))
+                text_press_key_rect = text_press_key.get_rect(center=(self.screen_width//2, self.screen_height//2 + 100))
+                
+                # Desenhar textos com efeito pulsante
+                pulse = (math.sin(current_time / 300) + 1) / 2  # Valor entre 0 e 1
+                victory_color = self.victory_text_color
+                pulse_color = (
+                    int(victory_color[0] * (0.8 + 0.2 * pulse)),
+                    int(victory_color[1] * (0.8 + 0.2 * pulse)),
+                    int(victory_color[2] * (0.8 + 0.2 * pulse))
+                )
+                
+                text_victory = victory_font.render("VITÓRIA!", True, pulse_color)
+                screen.blit(text_victory, text_victory_rect)
+                screen.blit(text_congratulations, text_congrats_rect)
+                screen.blit(text_press_key, text_press_key_rect)
+                
+        elif self.is_game_over:
             # Texto de Game Over
             game_over_font = pygame.font.SysFont(None, 72)
             text_game_over = game_over_font.render("GAME OVER", True, (255, 0, 0))
@@ -756,14 +853,17 @@ class GameplayState:
             fade_surface.fill((0, 0, 0))
             fade_surface.set_alpha(self.fade_alpha)
             screen.blit(fade_surface, (0, 0))
-
-            # Texto de carregamento
-            if self.loading_screen_active:
-                loading_text = self.loading_font.render("Carregando...", True, (255, 255, 255))
-                loading_rect = loading_text.get_rect(center=(self.screen_width / 2, self.screen_height / 2))
-                screen.blit(loading_text, loading_rect)
-
-        else:
-            # HUD normal
-            text_surface = font.render("ESPAÇO para pular, X para atirar, ESC para menu", True, (255, 255, 255))
-            screen.blit(text_surface, (10, 10))
+            
+    def take_damage(self):
+        """Aplica o efeito visual de dano ao jogador"""
+        if not self.is_flashing:  # Só aplica o efeito se não estiver já piscando
+            self.is_flashing = True
+            self.damage_flash_start = pygame.time.get_ticks()
+            
+    def start_victory_sequence(self):
+        """Inicia a sequência de vitória"""
+        self.game_won = True
+        self.show_victory_screen = True
+        self.victory_start_time = pygame.time.get_ticks()
+        # Para a música atual (se houver)
+        pygame.mixer.music.fadeout(1000)  # Fade out em 1 segundo
