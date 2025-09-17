@@ -1,19 +1,49 @@
 import pygame
 import random
+import os
 import math
-from .particle_system import ParticleSystem
+import sys
+
+# Adiciona o diretório raiz do projeto ao sys.path para resolver importações
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from game_states.particle_system import ParticleSystem
 
 class Boss(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
         # Atributos básicos
         self.pos = [x, y]
-        self.size = (200, 200)
-        self.health = 1000
-        self.max_health = 1000
-        self.image = pygame.Surface(self.size)
-        self.image.fill((255, 0, 0))
-        self.rect = self.image.get_rect(topleft=self.pos)
+        # --- MODIFICADO: Aumentar o tamanho do chefe ---
+        self.size = (350, 350)
+        # --- MODIFICADO: Mais vida para o chefe ---
+        self.health = 5000
+        self.max_health = 5000
+        self.facing_right = True
+
+        # --- MODIFICADO: Carregar as imagens do chefe (idle e atirando) ---
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir)
+        try:
+            # Carrega a imagem de idle (Boss.png)
+            idle_image_path = os.path.join(project_root, 'assets', 'images', 'Boss.png')
+            self.original_image_idle = pygame.image.load(idle_image_path).convert_alpha()
+            self.original_image_idle = pygame.transform.scale(self.original_image_idle, self.size)
+
+            # Carrega a imagem de tiro (Boss_shooting.png)
+            shooting_image_path = os.path.join(project_root, 'assets', 'images', 'Boss_shooting.png')
+            self.original_image_shooting = pygame.image.load(shooting_image_path).convert_alpha()
+            self.original_image_shooting = pygame.transform.scale(self.original_image_shooting, self.size)
+            
+            self.image = self.original_image_idle # Começa com a imagem idle
+        except Exception as e:
+            print(f"AVISO: Não foi possível carregar as imagens do chefe ('Boss.png', 'Boss_shooting.png'). Usando quadrado vermelho. Erro: {e}")
+            self.original_image_idle = None
+            self.original_image_shooting = None
+            self.image = pygame.Surface(self.size)
+            self.image.fill((255, 0, 0))
         
         # Estados e fases
         self.state = "idle"
@@ -22,27 +52,34 @@ class Boss(pygame.sprite.Sprite):
         
         # Timers e cooldowns
         self.last_attack_time = 0
-        self.attack_cooldown = 2000
+        # --- MODIFICADO: Ataques mais frequentes ---
+        self.attack_cooldown = 1200 # Reduzido de 2s para 1.2s
         self.dash_cooldown = 3000
         self.last_dash_time = 0
         self.pattern_start_time = 0
         self.current_pattern_duration = 0
         
         # Movimento
-        self.speed = 5
+        self.speed = 6 # --- MODIFICADO: Chefe mais rápido
         self.direction = 1
         self.velocity = [0, 0]
         self.dash_speed = 20
         self.is_dashing = False
         
         # Ataques
+        # --- NOVO: Parâmetros de IA ---
+        self.strafe_direction = 1
+        self.last_strafe_change = 0
+        self.strafe_interval = 1500 # --- MODIFICADO: Movimento mais errático
+        self.optimal_distance = 400 # Distância que o chefe tenta manter
+
         self.attack_patterns = {
             1: ["projectile_spray", "ground_pound", "circle_burst"],
             2: ["projectile_wall", "dash_attack", "cross_beam"],
             3: ["bullet_hell", "rage_dash", "laser_grid"]
         }
         self.current_pattern = None
-        self.bullets = []  # Lista de projéteis ativos
+        self._newly_fired_bullets = [] # Lista temporária para novos projéteis
         
         # Efeitos visuais
         self.flash_duration = 200
@@ -50,8 +87,12 @@ class Boss(pygame.sprite.Sprite):
         self.is_flashing = False
         self.particle_system = ParticleSystem()
 
-    def update(self, player_pos, current_time):
+        self.rect = self.image.get_rect(topleft=self.pos)
+
+    def update(self, player_pos, current_time, player_velocity_x=0):
         # Atualiza fase baseado na vida
+        self._newly_fired_bullets.clear() # Limpa a lista de novos tiros a cada frame
+
         health_percentage = self.health / self.max_health
         for phase, threshold in self.phase_thresholds.items():
             if health_percentage <= threshold and self.phase < phase:
@@ -60,35 +101,65 @@ class Boss(pygame.sprite.Sprite):
 
         # Atualiza estado e padrão de ataque
         if self.state == "idle":
-            self._update_movement(player_pos)
+            self._update_movement(player_pos, current_time)
             if current_time - self.last_attack_time > self.attack_cooldown:
-                self._start_attack_pattern(current_time)
+                self._start_attack_pattern(current_time, player_pos)
         elif self.state == "attacking":
-            self._update_attack_pattern(current_time, player_pos)
+            self._update_attack_pattern(current_time, player_pos, player_velocity_x)
         elif self.state == "dashing":
             self._update_dash()
 
         # Atualiza posição e projéteis
         self._update_position()
-        self._update_bullets(player_pos)
         
         # Atualiza efeitos visuais
         if hasattr(self, 'particle_system'):
             self.particle_system.update()
+        
+        return self._newly_fired_bullets
+            
+        # --- NOVO: Lógica para virar o chefe e trocar a imagem ---
+        # Determina a direção que o chefe deve encarar
+        if player_pos[0] > self.pos[0] + self.size[0] / 2:
+            self.facing_right = True
+        else:
+            self.facing_right = False
+            
+        # Seleciona a imagem base (idle ou atirando)
+        if self.state == "attacking" and self.original_image_shooting:
+            base_image = self.original_image_shooting
+        else:
+            base_image = self.original_image_idle
+        
+        # Vira a imagem se necessário e atualiza a imagem principal
+        if base_image:
+            self.image = pygame.transform.flip(base_image, not self.facing_right, False)
 
-    def _update_movement(self, player_pos):
+    def _update_movement(self, player_pos, current_time):
+        """Movimento tático: mantém distância e se move lateralmente."""
         if not self.is_dashing:
-            # Movimento básico em direção ao jogador com alguma aleatoriedade
             dx = player_pos[0] - self.pos[0]
             dy = player_pos[1] - self.pos[1]
             dist = math.sqrt(dx * dx + dy * dy)
-            
-            if dist > 300:  # Mantém distância mínima do jogador
-                self.velocity[0] = (dx / dist) * self.speed
-                self.velocity[1] = (dy / dist) * self.speed
+
+            # Muda a direção do strafe periodicamente
+            if current_time - self.last_strafe_change > self.strafe_interval:
+                self.strafe_direction *= -1
+                self.last_strafe_change = current_time
+
+            # Movimento para manter a distância ótima
+            if dist > self.optimal_distance + 50: # Se muito longe, aproxima
+                self.velocity[0] = (dx / dist) * self.speed * 0.5
+            elif dist < self.optimal_distance - 50: # Se muito perto, afasta
+                self.velocity[0] = -(dx / dist) * self.speed * 0.5
             else:
-                self.velocity[0] *= 0.95  # Desacelera suavemente
-                self.velocity[1] *= 0.95
+                self.velocity[0] *= 0.9 # Desacelera se na distância certa
+
+            # Adiciona o movimento lateral (strafe)
+            self.velocity[0] += self.strafe_direction * self.speed * 0.5
+
+            # Movimento vertical para seguir o jogador
+            self.velocity[1] = (dy / dist) * self.speed * 0.7 if dist > 0 else 0
 
     def _update_position(self):
         # Atualiza posição com base na velocidade
@@ -101,94 +172,104 @@ class Boss(pygame.sprite.Sprite):
         
         self.rect.topleft = self.pos
 
-    def _start_attack_pattern(self, current_time, player_pos=None):
-        if not self.current_pattern:
-            # Escolhe um padrão de ataque da fase atual
-            self.current_pattern = random.choice(self.attack_patterns[self.phase])
-            self.pattern_start_time = current_time
-            self.state = "attacking"
-            
-            # Configura duração e comportamento do padrão
-            if self.current_pattern == "projectile_spray":
-                self.current_pattern_duration = 3000
-            elif self.current_pattern == "bullet_hell":
-                self.current_pattern_duration = 5000
-            elif self.current_pattern == "dash_attack" and player_pos:
-                self.current_pattern_duration = 2000
-                self._start_dash(player_pos)
+    def _start_attack_pattern(self, current_time, player_pos):
+        """Escolhe um ataque taticamente com base na distância do jogador."""
+        if self.current_pattern: return
 
-    def _update_attack_pattern(self, current_time, player_pos):
+        dist_to_player = math.dist(self.pos, player_pos)
+        available_attacks = self.attack_patterns[self.phase]
+        
+        # Lógica de seleção tática
+        if dist_to_player < 300 and "dash_attack" in available_attacks:
+            self.current_pattern = "dash_attack"
+        elif dist_to_player < 400 and "cross_beam" in available_attacks:
+            self.current_pattern = "cross_beam"
+        else:
+            # Se não se encaixa em nenhuma condição especial, escolhe um aleatório
+            self.current_pattern = random.choice(available_attacks)
+
+        self.pattern_start_time = current_time
+        self.state = "attacking"
+        
+        # Configura duração e comportamento do padrão
+        if self.current_pattern == "projectile_spray":
+            self.current_pattern_duration = 3000
+        elif self.current_pattern == "bullet_hell":
+            self.current_pattern_duration = 5000
+        elif self.current_pattern == "cross_beam":
+            self.current_pattern_duration = 2000
+        elif self.current_pattern == "dash_attack":
+            self.current_pattern_duration = 2000
+            self._start_dash(player_pos)
+
+    def _update_attack_pattern(self, current_time, player_pos, player_velocity_x):
         time_in_pattern = current_time - self.pattern_start_time
         
         if time_in_pattern > self.current_pattern_duration:
             self._end_attack_pattern()
             return
 
-        # Executa o padrão de ataque atual
+        # --- MODIFICADO: Executa o padrão de ataque atual com tiro preditivo ---
         if self.current_pattern == "projectile_spray":
-            if time_in_pattern % 200 == 0:  # Atira a cada 200ms
-                self._fire_projectile(player_pos)
+            if time_in_pattern % 150 == 0:  # --- MODIFICADO: Atira a cada 150ms
+                self._fire_projectile(player_pos, player_velocity_x)
         elif self.current_pattern == "bullet_hell":
-            if time_in_pattern % 100 == 0:  # Atira mais rápido
-                for angle in range(0, 360, 45):  # 8 direções
+            if time_in_pattern % 120 == 0:  # --- MODIFICADO: Atira mais rápido
+                for angle in range(0, 360, 30):  # --- MODIFICADO: 12 direções em vez de 8
                     self._fire_projectile_angle(angle)
         elif self.current_pattern == "cross_beam":
             if time_in_pattern % 500 == 0:
                 self._fire_cross_beam()
 
-    def _fire_projectile(self, target_pos):
-        dx = target_pos[0] - self.pos[0]
-        dy = target_pos[1] - self.pos[1]
+    def _fire_projectile(self, target_pos, player_velocity_x):
+        """Atira um projétil que antecipa o movimento do jogador."""
+        bullet_speed = 20 # --- MODIFICADO: Projéteis ainda mais rápidos
+        start_pos = [self.pos[0] + self.size[0]/2, self.pos[1] + self.size[1]/2]
+        
+        # --- NOVO: Lógica de tiro preditivo ---
+        dist_to_target = math.dist(start_pos, target_pos)
+        time_to_reach = dist_to_target / bullet_speed if bullet_speed > 0 else 0
+        predicted_x = target_pos[0] + player_velocity_x * time_to_reach * 0.8 # 0.8 para não ser perfeito demais
+        predicted_y = target_pos[1]
+
+        dx = predicted_x - start_pos[0]
+        dy = predicted_y - start_pos[1]
         dist = math.sqrt(dx * dx + dy * dy)
         if dist > 0:
-            start_pos = [self.pos[0] + self.size[0]/2, self.pos[1] + self.size[1]/2]
+            direction = [(dx/dist), (dy/dist)]
             bullet = {
-                'pos': start_pos.copy(),
-                'velocity': [(dx/dist) * 10, (dy/dist) * 10],
-                'type': 'normal',
-                'damage': 10
+                'pos': start_pos,
+                'direction': direction,
+                'damage': 10,
+                'visual_type': 'boss_laser' # Identificador para o visual
             }
-            self.bullets.append(bullet)
+            self._newly_fired_bullets.append(bullet)
             
             # Efeito de partículas no disparo
             self.particle_system.create_explosion(start_pos[0], start_pos[1], (255, 200, 0, 200), 10)
-            # Trail do projétil
-            self.particle_system.create_trail(start_pos[0], start_pos[1], (255, 100, 0, 150), 
-                                           [dx/dist, dy/dist])
 
     def _fire_projectile_angle(self, angle):
         rad = math.radians(angle)
+        direction = [math.cos(rad), math.sin(rad)]
         bullet = {
             'pos': [self.pos[0] + self.size[0]/2, self.pos[1] + self.size[1]/2],
-            'velocity': [math.cos(rad) * 10, math.sin(rad) * 10],
-            'type': 'normal',
-            'damage': 10
+            'direction': direction,
+            'damage': 10,
+            'visual_type': 'boss_laser'
         }
-        self.bullets.append(bullet)
+        self._newly_fired_bullets.append(bullet)
 
-    def _update_bullets(self, player_pos):
-        for bullet in self.bullets[:]:
-            # Adiciona trail de partículas enquanto o projétil se move
-            self.particle_system.create_trail(
-                bullet['pos'][0], bullet['pos'][1],
-                (255, 100, 0, 100),
-                [bullet['velocity'][0]/10, bullet['velocity'][1]/10],
-                2
-            )
-            
-            bullet['pos'][0] += bullet['velocity'][0]
-            bullet['pos'][1] += bullet['velocity'][1]
-            
-            # Remove projéteis fora da tela
-            if (bullet['pos'][0] < -100 or bullet['pos'][0] > 1380 or
-                bullet['pos'][1] < -100 or bullet['pos'][1] > 820):
-                # Efeito de desvanecimento ao remover
-                self.particle_system.create_explosion(
-                    bullet['pos'][0], bullet['pos'][1],
-                    (255, 100, 0, 150),
-                    5
-                )
-                self.bullets.remove(bullet)
+    def _fire_cross_beam(self):
+        """Fires projectiles in four cardinal directions (cross shape)."""
+        self._fire_projectile_angle(0)    # Right
+        self._fire_projectile_angle(90)   # Down
+        self._fire_projectile_angle(180)  # Left
+        self._fire_projectile_angle(270)  # Up
+        
+        # Add some particle effects for the attack
+        center_x = self.pos[0] + self.size[0] / 2
+        center_y = self.pos[1] + self.size[1] / 2
+        self.particle_system.create_explosion(center_x, center_y, (200, 200, 255, 200), 25)
 
     def _end_attack_pattern(self):
         self.current_pattern = None
@@ -248,15 +329,6 @@ class Boss(pygame.sprite.Sprite):
         
         screen.blit(self.image, screen_pos)
         
-        # Desenha os projéteis com efeito de brilho
-        for bullet in self.bullets:
-            bullet_pos = (int(bullet['pos'][0] + camera_offset_x), int(bullet['pos'][1] + camera_offset_y))
-            # Brilho externo
-            pygame.draw.circle(screen, (255, 200, 0, 128), bullet_pos, 8)
-            # Núcleo do projétil
-            pygame.draw.circle(screen, (255, 255, 200), bullet_pos, 5)
-            pygame.draw.circle(screen, (255, 255, 255), bullet_pos, 3)
-        
         # Barra de vida com cores dinâmicas baseadas na fase
         health_bar_width = 200
         health_bar_height = 20
@@ -282,4 +354,3 @@ class Boss(pygame.sprite.Sprite):
         glow_surface = pygame.Surface((glow_width, glow_height), pygame.SRCALPHA)
         glow_surface.fill(glow_color)
         screen.blit(glow_surface, (screen_pos[0], screen_pos[1] - 30 - glow_height))
-

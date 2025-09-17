@@ -2,10 +2,17 @@ import os
 import pygame
 import random
 import math
-from .map_manager import MapManager
-from .enemy import Enemy
-from .collectible import Collectible
-from .boss import Boss
+import sys
+
+# Adiciona o diretório raiz do projeto ao sys.path para resolver importações
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from game_states.map_manager import MapManager
+from game_states.enemy import Enemy
+from game_states.collectible import Collectible
+from game_states.boss import Boss
 
 class GameplayState:
     def __init__(self, game_manager, screen_width, screen_height, is_boss_fight=False):
@@ -69,6 +76,7 @@ class GameplayState:
         self.current_health = self.max_health
         self.max_ammo = 60 # Munição máxima
         self.current_ammo = 60  # Munição inicial
+        
         self.shot_cooldown = 300  # Aumentado para 300ms (era 80ms)
         self.collectibles = []  # Lista de coletáveis
 
@@ -78,7 +86,7 @@ class GameplayState:
         self.trenches = []  # Lista de trincheiras (cada uma é um grupo de inimigos)
         self.trench_positions = [] # Posições X das trincheiras
         self.enemy_bullets = []  # Lista de tiros dos inimigos
-        self.num_trenches = 4  # Número de trincheiras antes do boss
+        self.num_trenches = 2  # Número de trincheiras antes do boss
         self.trench_width = 400  # Largura de cada trincheira
         self.trench_spacing = 3000  # Espaçamento entre trincheiras (valor reduzido)
         self.game_won = False  # Estado de vitória do jogo
@@ -100,6 +108,16 @@ class GameplayState:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(script_dir)
         
+        # --- NOVO: Carregar imagem da tela de carregamento ---
+        self.loading_screen_image = None
+        try:
+            # O usuário pediu para usar 'nave.png' para a tela de carregamento
+            loading_image_path = os.path.join(project_root, 'assets', 'images', 'nave.png')
+            self.loading_screen_image = pygame.image.load(loading_image_path).convert()
+            self.loading_screen_image = pygame.transform.scale(self.loading_screen_image, (self.screen_width, self.screen_height))
+        except Exception as e:
+            print(f"AVISO: Não foi possível carregar a imagem da tela de carregamento 'nave.png'. Usando tela preta. Erro: {e}")
+
         # Carregar texturas dos corações e munição
         try:
             # Carregar corações
@@ -119,7 +137,7 @@ class GameplayState:
             self.ammo_symbol_img = None
             
         # Estado inicial do jogador
-        self.reset_player()
+        # self.reset_player() # MOVENDO: Esta chamada será movida para o final do __init__
         
         # --- NOVO: Carrega o fundo com base no modo de jogo ---
         if self.is_boss_fight:
@@ -151,18 +169,23 @@ class GameplayState:
                 self.background_width = screen_width
                 self.background_height = screen_height
 
-        # --- NOVO: Carrega a textura da nave (área do chefe) ---
+        # --- NOVO: Carrega a textura da nave (fundo da área do chefe e a nave-objeto) ---
+        self.boss_ship_image = None # Imagem da nave no final da fase
         try:
-            self.boss_background_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'nave_background.png')).convert()
+            # Carrega a imagem da nave que o jogador deve alcançar
+            ship_image_path = os.path.join(project_root, 'assets', 'images', 'nave.png')
+            self.boss_ship_image = pygame.image.load(ship_image_path).convert_alpha()
+            # Redimensiona a nave para um tamanho apropriado no jogo (ex: 400px de altura)
+            original_w, original_h = self.boss_ship_image.get_size()
+            aspect_ratio = original_w / original_h if original_h > 0 else 1
+            # --- MODIFICADO: A nave agora preenche a altura da tela acima do chão ---
+            new_h = self.ground_y
+            new_w = int(new_h * aspect_ratio)
+            self.boss_ship_image = pygame.transform.scale(self.boss_ship_image, (new_w, new_h))
             
-            # Ajusta a altura para ser exatamente a altura da tela
-            original_aspect = self.boss_background_image.get_width() / self.boss_background_image.get_height()
-            new_height = screen_height
-            new_width = int(new_height * original_aspect)
-            self.boss_background_image = pygame.transform.scale(self.boss_background_image, (new_width, new_height))
-            self.boss_background_width = new_width
+            self.boss_background_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'nave_background.png')).convert()
         except Exception as e:
-            print(f"Erro ao carregar fundo_nave.png: {e}")
+            print(f"AVISO: Não foi possível carregar a imagem da nave 'nave.png' ou 'nave_background.png'. A transição ainda funcionará. Erro: {e}")
             self.boss_background_image = pygame.Surface((screen_width, screen_height))
             self.boss_background_image.fill((20, 0, 30)) # Fallback para um roxo escuro
             
@@ -270,10 +293,18 @@ class GameplayState:
             self.boss_group.add(self.boss)
 
     def _create_boss_area(self):
-        """Cria a área do chefe com a porta de transição."""
-        # A "porta" agora é uma linha de gatilho invisível no início da área do chefe.
-        # O jogador colide com ela assim que alcança a coordenada X.
-        self.door_rect = pygame.Rect(self.boss_area_start_x, 0, 1, self.screen_height)
+        """Cria a área do chefe com a nave visível para transição."""
+        if self.boss_ship_image:
+            # Posiciona a nave no chão, no início da área do chefe
+            ship_w = self.boss_ship_image.get_width()
+            ship_h = self.boss_ship_image.get_height()
+            ship_x = self.boss_area_start_x
+            ship_y = self.ground_y - ship_h
+            # O 'door_rect' agora é a hitbox da nave, servindo de gatilho para a transição
+            self.door_rect = pygame.Rect(ship_x, ship_y, ship_w, ship_h)
+        else:
+            # Fallback: se a imagem não carregou, usa o gatilho invisível original
+            self.door_rect = pygame.Rect(self.boss_area_start_x, 0, 1, self.screen_height)
     
     def _create_trench(self, x_pos):
         """Cria uma trincheira com inimigos em posições aleatórias."""
@@ -359,15 +390,6 @@ class GameplayState:
                 print("Transição concluída! Indo para a arena do chefe.")
                 self.game_manager.set_state('boss_fight') # --- MUDANÇA AQUI ---
             return # Pausa o jogo durante o carregamento
-
-        if self.is_fading_to_black:
-            self.fade_alpha += 5  # Aumenta a opacidade do fade
-            if self.fade_alpha >= 255:
-                self.fade_alpha = 255
-                self.is_fading_to_black = False # Termina o fade
-                self.loading_screen_active = True # Ativa a tela de carregamento
-                self.loading_timer_start = pygame.time.get_ticks()
-            return # Pausa o jogo durante o fade
 
         if self.is_game_over: # Jogo normal pausado em game over
             return  # Não atualiza a gameplay se estiver em game over
@@ -556,12 +578,17 @@ class GameplayState:
                 self.enemy_bullets.append(bullet)
         
         if self.is_boss_fight and self.boss:
-            self.boss.update(self.player_pos, current_time)
+            # O update do chefe agora retorna uma lista de novos projéteis
+            new_boss_bullets = self.boss.update(self.player_pos, current_time, self.player_velocity_x)
+            if new_boss_bullets:
+                self.enemy_bullets.extend(new_boss_bullets)
 
         # Atualizar projéteis inimigos
         for bullet in self.enemy_bullets[:]:
-            bullet['pos'][0] += 15 * bullet['direction'][0]
-            bullet['pos'][1] += 15 * bullet['direction'][1]
+            # --- MODIFICADO: Usa velocidade diferente para chefe e inimigos normais ---
+            speed = 18 if bullet.get('visual_type') == 'boss_laser' else 15
+            bullet['pos'][0] += speed * bullet['direction'][0]
+            bullet['pos'][1] += speed * bullet['direction'][1]
             
             bullet_rect = pygame.Rect(bullet['pos'][0] - 5, bullet['pos'][1] - 5, 10, 10)
 
@@ -582,7 +609,9 @@ class GameplayState:
                 continue
             
             if bullet_rect.colliderect(player_rect):
-                self.player_hit_points -= 1
+                # --- MODIFICADO: Usa o dano definido no projétil ---
+                damage = bullet.get('damage', 1) # Dano padrão de 1 para robôs normais
+                self.player_hit_points -= damage
                 self.current_health = math.ceil(self.player_hit_points / self.hits_per_heart)
                 self.enemy_bullets.remove(bullet)
                 self.take_damage()  # Ativa o efeito de flash vermelho
@@ -604,10 +633,12 @@ class GameplayState:
                 self.collectibles.remove(collectible)
 
         # --- NOVO: Verificar colisão com a porta da nave ---
-        if self.door_rect and not self.is_fading_to_black:
+        if self.door_rect and not self.loading_screen_active:
             if player_rect.colliderect(self.door_rect):
                 print("Jogador alcançou a porta! Iniciando transição...")
-                self.is_fading_to_black = True
+                # --- MODIFICADO: Pula o fade e vai direto para a tela de carregamento ---
+                self.loading_screen_active = True
+                self.loading_timer_start = pygame.time.get_ticks()
 
         # --- NOVO: Lógica de câmera e limites do mundo ---
         if not self.is_boss_fight:
@@ -655,12 +686,14 @@ class GameplayState:
             screen.blit(self.background_image, (bg_x, 0))
 
             # Desenha o fundo da nave por cima durante a transição
-            if self.camera_x + self.screen_width > self.boss_area_start_x:
-                boss_bg_x = self.boss_area_start_x + camera_offset_x
-                screen.blit(self.boss_background_image, (boss_bg_x, 0))
+            if self.boss_background_image:
+                if self.camera_x + self.screen_width > self.boss_area_start_x:
+                    boss_bg_x = self.boss_area_start_x + camera_offset_x
+                    screen.blit(self.boss_background_image, (boss_bg_x, 0))
 
-
-        # A porta da nave (door_rect) agora é um gatilho invisível e não é mais desenhada.
+        # --- NOVO: Desenha a nave no final da fase ---
+        if self.door_rect and self.boss_ship_image:
+            screen.blit(self.boss_ship_image, (self.door_rect.x + camera_offset_x, self.door_rect.y + camera_offset_y))
 
         
         # --- NOVO: Desenhar o chão fixo ---
@@ -710,16 +743,26 @@ class GameplayState:
             
         # Desenhar lasers inimigos
         for bullet in self.enemy_bullets:
-            # Desenhar o laser como uma linha vermelha brilhante
             start_pos = (int(bullet['pos'][0] + camera_offset_x), 
                         int(bullet['pos'][1] + camera_offset_y))
             end_pos = (int(bullet['pos'][0] - bullet['direction'][0] * 20 + camera_offset_x),
                       int(bullet['pos'][1] - bullet['direction'][1] * 20 + camera_offset_y))
             
-            # Desenhar o brilho externo do laser
-            pygame.draw.line(screen, (255, 100, 100), start_pos, end_pos, 4)
-            # Desenhar o núcleo brilhante do laser
-            pygame.draw.line(screen, (255, 255, 255), start_pos, end_pos, 2)
+            # --- MODIFICADO: Desenha o laser com base no seu tipo ---
+            if bullet.get('visual_type') == 'boss_laser':
+                # Laser do chefe: Roxo e mais grosso
+                glow_color = (255, 0, 255) # Roxo/Magenta
+                core_color = (255, 200, 255)
+                glow_width = 6
+                core_width = 3
+            else:
+                # Laser do robô normal: Vermelho
+                glow_color = (255, 100, 100)
+                core_color = (255, 255, 255)
+                glow_width = 4
+                core_width = 2
+            pygame.draw.line(screen, glow_color, start_pos, end_pos, glow_width)
+            pygame.draw.line(screen, core_color, start_pos, end_pos, core_width)
         
         # Desenhar projéteis
         for bullet in self.bullets:
@@ -846,13 +889,17 @@ class GameplayState:
             
             screen.blit(text_game_over, text_game_over_rect)
             screen.blit(text_restart, text_restart_rect)
-        # --- NOVO: Desenhar a tela de fade e carregamento ---
-        elif self.is_fading_to_black or self.loading_screen_active:
-            # Superfície para o fade-out
-            fade_surface = pygame.Surface((self.screen_width, self.screen_height))
-            fade_surface.fill((0, 0, 0))
-            fade_surface.set_alpha(self.fade_alpha)
-            screen.blit(fade_surface, (0, 0))
+        elif self.loading_screen_active:
+            # Mostra a imagem de carregamento em vez da tela preta
+            if self.loading_screen_image:
+                screen.blit(self.loading_screen_image, (0, 0))
+            else:
+                # Fallback para tela preta se a imagem 'nave.png' não for encontrada
+                screen.fill((0, 0, 0))
+            # Adiciona um texto "Carregando..." sobre a imagem
+            loading_text = self.loading_font.render("Carregando...", True, (255, 255, 255))
+            text_rect = loading_text.get_rect(center=(self.screen_width / 2, self.screen_height - 100))
+            screen.blit(loading_text, text_rect)
             
     def take_damage(self):
         """Aplica o efeito visual de dano ao jogador"""
