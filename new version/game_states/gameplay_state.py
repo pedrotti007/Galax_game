@@ -73,9 +73,12 @@ class GameplayState:
         self.max_health = 5  # Número máximo de corações
         self.hits_per_heart = 15
         self.player_hit_points = self.max_health * self.hits_per_heart
-        self.current_health = self.max_health
-        self.max_ammo = 60 # Munição máxima
-        self.current_ammo = 60  # Munição inicial
+        self.current_health = self.max_health        
+        if self.is_boss_fight:
+            self.max_ammo = 120
+        else:
+            self.max_ammo = 60 # Munição máxima
+        self.current_ammo = self.max_ammo  # Munição inicial
         
         self.shot_cooldown = 300  # Aumentado para 300ms (era 80ms)
         self.collectibles = []  # Lista de coletáveis
@@ -183,9 +186,9 @@ class GameplayState:
             new_w = int(new_h * aspect_ratio)
             self.boss_ship_image = pygame.transform.scale(self.boss_ship_image, (new_w, new_h))
             
-            self.boss_background_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'nave_background.png')).convert()
+            self.boss_background_image = pygame.image.load(os.path.join(project_root, 'assets', 'images', 'fundo_nave.png')).convert()
         except Exception as e:
-            print(f"AVISO: Não foi possível carregar a imagem da nave 'nave.png' ou 'nave_background.png'. A transição ainda funcionará. Erro: {e}")
+            print(f"AVISO: Não foi possível carregar a imagem da nave 'nave.png' ou 'fundo_nave.png'. A transição ainda funcionará. Erro: {e}")
             self.boss_background_image = pygame.Surface((screen_width, screen_height))
             self.boss_background_image.fill((20, 0, 30)) # Fallback para um roxo escuro
             
@@ -340,8 +343,8 @@ class GameplayState:
         self.trenches.append(trench)
         
     def _spawn_collectible(self, x, y):
-        """Cria um coletável com 50% de chance de ser coração ou munição."""
-        if random.random() < 0.5:  # 50% de chance para cada tipo
+        """Cria um coletável com 70% de chance de ser munição e 30% de ser coração."""
+        if random.random() < 0.3:  # 30% de chance para coração
             collectible = Collectible(x, y, "heart")
         else:
             collectible = Collectible(x, y, "ammo")
