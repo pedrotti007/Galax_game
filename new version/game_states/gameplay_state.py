@@ -630,7 +630,7 @@ class GameplayState:
                     self.current_health = math.ceil(self.player_hit_points / self.hits_per_heart)
                     self.collectibles.remove(collectible)
                 elif collectible.type == "ammo":
-                    self.current_ammo += 20
+                    self.current_ammo += 40
                     self.collectibles.remove(collectible)
             if collectible.pos[1] > self.screen_height * 2:
                 self.collectibles.remove(collectible)
